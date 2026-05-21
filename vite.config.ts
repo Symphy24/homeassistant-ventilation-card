@@ -12,6 +12,7 @@ export default defineConfig({
         entryFileNames: "ventilation-card.js",
       },
     },
-    sourcemap: true,
+    minify: "esbuild",
+    sourcemap: false,
   },
 });
