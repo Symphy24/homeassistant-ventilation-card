@@ -1,0 +1,32 @@
+{
+  "name": "homeassistant-ventilation-card",
+  "version": "0.1.0",
+  "description": "A Home Assistant Lovelace custom card for residential ventilation/AHU visualization.",
+  "type": "module",
+  "main": "dist/ventilation-card.js",
+  "files": [
+    "dist",
+    "README.md",
+    "hacs.json"
+  ],
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite --host 0.0.0.0"
+  },
+  "keywords": [
+    "home-assistant",
+    "lovelace",
+    "custom-card",
+    "hacs",
+    "ventilation",
+    "ahu"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "lit": "^3.3.1"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.3",
+    "vite": "^6.3.5"
+  }
+}
