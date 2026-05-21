@@ -1,6 +1,6 @@
 # homeassistant-ventilation-card
 
-A Home Assistant Lovelace custom card for visualizing residential ventilation/AHU units in a Norwegian SD/BMS-style layout.
+A Home Assistant Lovelace custom card for visualizing residential ventilation/AHU units in a SD/BMS-style layout.
 
 The first target use case is a Flexit Nordic L6 ventilation unit, but the card is intentionally generic and reads configurable Home Assistant entities. It does not communicate with BACnet or any ventilation unit directly.
 
