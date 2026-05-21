@@ -198,10 +198,10 @@ export class VentilationCard extends LitElement {
       <g class="heat-exchanger" transform="translate(${x} ${y})" style="--rotor-duration: ${duration};">
         <circle class="rotor-ring" r="72"></circle>
         <g class="rotor-motion ${active ? "spin" : ""}">
-          <path class="rotor-arrow" d="M47 -43 A64 64 0 0 0 -47 -43"></path>
-          <path class="rotor-arrow-head" d="M-47 -43 L-34 -49 L-39 -34"></path>
-          <path class="rotor-arrow" d="M-47 43 A64 64 0 0 0 47 43"></path>
-          <path class="rotor-arrow-head" d="M47 43 L34 49 L39 34"></path>
+          <path class="rotor-arrow" d="M-47 -43 A64 64 0 0 1 47 -43"></path>
+          <path class="rotor-arrow-head" d="M35 -48 L47 -43 L43 -55"></path>
+          <path class="rotor-arrow" d="M47 43 A64 64 0 0 1 -47 43"></path>
+          <path class="rotor-arrow-head" d="M-35 48 L-47 43 L-43 55"></path>
         </g>
         <g class="heat-waves">
           <path d="M-28 -48 C-14 -30 -42 -12 -28 8 C-14 28 -42 42 -28 54"></path>
