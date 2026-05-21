@@ -19,6 +19,7 @@ export interface LovelaceCardConfig {
   exchanger_type?: "rotary" | string;
   show_airflow?: boolean;
   entities?: VentilationEntities;
+  labels?: Partial<Record<keyof VentilationEntities, string>>;
 }
 
 export interface VentilationEntities {
