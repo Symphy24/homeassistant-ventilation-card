@@ -1,7 +1,7 @@
 import { LitElement, css, html, nothing, svg } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import "./ventilation-card-editor";
-import type { EntityDisplay, HassEntity, HomeAssistant, LovelaceCardConfig, VentilationEntities } from "./types";
+import type { EntityDisplay, HassEntity, HomeAssistant, LovelaceCardConfig, ValueBoxKey, VentilationEntities } from "./types";
 
 const UNAVAILABLE_STATES = new Set(["unknown", "unavailable", "none", ""]);
 
@@ -100,7 +100,6 @@ export class VentilationCard extends LitElement {
       ["--vc-air-exhaust", colors?.exhaust_air],
       ["--vc-value-box-border-color", valueBox?.border_color],
       ["--vc-value-box-background-color", valueBox?.background_color],
-      ["--vc-value-box-text-color", valueBox?.text_color],
     ];
 
     return styleValues
@@ -191,20 +190,20 @@ export class VentilationCard extends LitElement {
 
         ${this.renderFilter(220, 240)}
         ${this.renderFilter(702, 120)}
-        ${this.renderHeatExchanger(460, 180, rotorSpeed, rotorDuration)}
+        ${this.renderHeatExchanger(460, 180, rotorSpeed, rotorDuration, this.config?.exchanger_type ?? "rotary")}
         ${this.renderFan(260, 120, extractFanSpeed, extractFanDuration, "extract")}
         ${this.renderFan(660, 240, supplyFanSpeed, supplyFanDuration, "supply")}
         ${this.renderHeaterCoil(734, 240, heaterOutput)}
 
         <g class="badges">
-          ${this.renderValueLabel(28, 64, exhaustTemp.label, exhaustTemp.value, "exhaust")}
-          ${this.renderValueLabel(792, 64, extractTemp.label, extractTemp.value, "extract")}
-          ${this.renderValueLabel(28, 258, outdoorTemp.label, outdoorTemp.value, "outdoor")}
-          ${this.renderValueLabel(792, 258, supplyTemp.label, supplyTemp.value, "supply")}
-          ${this.renderValueLabel(190, 38, extractFan.label, extractFan.value, "component")}
-          ${this.renderValueLabel(610, 304, supplyFan.label, supplyFan.value, "component")}
-          ${this.renderValueLabel(411, 274, heatExchanger.label, heatExchanger.value, "component")}
-          ${this.renderValueLabel(714, 178, heater.label, heater.value, heaterOutput > 0 ? "heater-active" : "neutral")}
+          ${this.renderValueLabel(28, 64, exhaustTemp.label, exhaustTemp.value, "exhaust", "exhaust_temp")}
+          ${this.renderValueLabel(792, 64, extractTemp.label, extractTemp.value, "extract", "extract_temp")}
+          ${this.renderValueLabel(28, 258, outdoorTemp.label, outdoorTemp.value, "outdoor", "outdoor_temp")}
+          ${this.renderValueLabel(792, 258, supplyTemp.label, supplyTemp.value, "supply", "supply_temp")}
+          ${this.renderValueLabel(190, 38, extractFan.label, extractFan.value, "component", "extract_fan")}
+          ${this.renderValueLabel(610, 304, supplyFan.label, supplyFan.value, "component", "supply_fan")}
+          ${this.renderValueLabel(411, 274, heatExchanger.label, heatExchanger.value, "component", "heat_exchanger_speed")}
+          ${this.renderValueLabel(714, 178, heater.label, heater.value, heaterOutput > 0 ? "heater-active" : "neutral", "heater_output")}
         </g>
       </svg>
     `;
@@ -227,8 +226,18 @@ export class VentilationCard extends LitElement {
     `;
   }
 
-  private renderHeatExchanger(x: number, y: number, speed: number, duration: string) {
+  private renderHeatExchanger(x: number, y: number, speed: number, duration: string, exchangerType: string) {
+    if (exchangerType === "none") {
+      return nothing;
+    }
     const active = speed > 0;
+    if (exchangerType === "crossflow") {
+      return svg`<g class="heat-exchanger crossflow" transform="translate(${x} ${y})" style="--rotor-duration: ${duration};">
+        <rect class="crossflow-box" x="-54" y="-54" width="108" height="108" rx="8"></rect>
+        <path d="M-44 -42 L42 44"></path>
+        <path d="M-42 44 L44 -42"></path>
+      </g>`;
+    }
 
     return svg`
       <g class="heat-exchanger" transform="translate(${x} ${y})" style="--rotor-duration: ${duration};">
@@ -283,9 +292,14 @@ export class VentilationCard extends LitElement {
     `;
   }
 
-  private renderValueLabel(x: number, y: number, label: string, value: string, tone = "neutral") {
+  private renderValueLabel(x: number, y: number, label: string, value: string, tone = "neutral", key?: ValueBoxKey) {
+    const override = key ? this.config?.value_boxes?.[key] : undefined;
+    const style = [
+      override?.border_color ? `--vc-badge-border-color: ${override.border_color};` : "",
+      override?.font_size ? `--vc-badge-font-size: ${override.font_size}px;` : "",
+    ].join(" ");
     return svg`
-      <g class="svg-badge ${tone}" transform="translate(${x} ${y})">
+      <g class="svg-badge ${tone}" transform="translate(${x} ${y})" style=${style}>
         <rect width="98" height="34" rx="6"></rect>
         <text x="8" y="13" class="badge-label">${label}</text>
         <text x="8" y="27" class="badge-value">${value}</text>
@@ -618,6 +632,17 @@ export class VentilationCard extends LitElement {
     .heat-exchanger {
       color: var(--vc-component-line);
     }
+    .heat-exchanger.crossflow path {
+      stroke-width: 6;
+      opacity: 0.8;
+    }
+
+    .heat-exchanger.crossflow .crossflow-box {
+      fill: var(--vc-component-surface);
+      fill-opacity: 0.88;
+      stroke: var(--vc-component-line);
+      stroke-width: 2.6;
+    }
 
     .rotor-motion {
       transform-box: fill-box;
@@ -696,7 +721,7 @@ export class VentilationCard extends LitElement {
     .svg-badge rect {
       fill: var(--vc-value-box-background-color, var(--ha-card-background, var(--card-background-color, #ffffff)));
       fill-opacity: 0.92;
-      stroke: var(--vc-value-box-border-color, var(--divider-color, rgba(127, 127, 127, 0.56)));
+      stroke: var(--vc-badge-border-color, var(--vc-value-box-border-color, var(--divider-color, rgba(127, 127, 127, 0.56))));
       stroke-width: 1.35;
     }
 
@@ -728,7 +753,7 @@ export class VentilationCard extends LitElement {
     }
 
     .svg-badge text {
-      fill: var(--vc-value-box-text-color, var(--primary-text-color, #111));
+      fill: var(--primary-text-color, #111);
       dominant-baseline: middle;
     }
 
@@ -739,7 +764,7 @@ export class VentilationCard extends LitElement {
     }
 
     .svg-badge .badge-value {
-      font-size: 12px;
+      font-size: var(--vc-badge-font-size, 12px);
       font-weight: 600;
     }
 

@@ -13,7 +13,7 @@ export interface HassEntity {
   };
 }
 
-export type ExchangerType = "rotary" | "crossflow" | "counterflow" | "none" | (string & {});
+export type ExchangerType = "rotary" | "crossflow" | "none" | (string & {});
 
 export interface VentilationEntities {
   outdoor_temp?: string;
@@ -41,7 +41,13 @@ export interface VentilationColors {
 export interface VentilationValueBoxConfig {
   border_color?: string;
   background_color?: string;
-  text_color?: string;
+}
+
+export type ValueBoxKey = keyof VentilationEntities;
+
+export interface VentilationValueBoxOverride {
+  border_color?: string;
+  font_size?: number;
 }
 
 export interface LovelaceCardConfig {
@@ -53,6 +59,7 @@ export interface LovelaceCardConfig {
   labels?: VentilationLabels;
   colors?: VentilationColors;
   value_box?: VentilationValueBoxConfig;
+  value_boxes?: Partial<Record<ValueBoxKey, VentilationValueBoxOverride>>;
 }
 
 export interface EntityDisplay {
