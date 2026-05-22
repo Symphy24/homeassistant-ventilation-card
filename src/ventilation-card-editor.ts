@@ -1,171 +1,913 @@
-import { LitElement, css, html, nothing } from "lit";
+import { LitElement, TemplateResult, css, html, nothing } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import type {
   ExchangerType,
   HomeAssistant,
   LovelaceCardConfig,
   ValueBoxKey,
+  VentilationAnimationConfig,
   VentilationColors,
+  VentilationComponentSettings,
   VentilationEntities,
+  VentilationFormatConfig,
   VentilationLabels,
+  VentilationVisibility,
   VentilationValueBoxConfig,
   VentilationValueBoxOverride,
 } from "./types";
 
-type PanelDef = { key: ValueBoxKey; title: string };
+type ComponentPanel = {
+  key: ValueBoxKey;
+  title: string;
+  defaultLabel: string;
+};
 
-const PANELS: PanelDef[] = [
-  { key: "outdoor_temp", title: "Outdoor air / Inntak" },
-  { key: "supply_temp", title: "Supply air / Tilluft" },
-  { key: "extract_temp", title: "Extract air / Avtrekk" },
-  { key: "exhaust_temp", title: "Exhaust air / Avkast" },
-  { key: "supply_fan", title: "Supply fan" },
-  { key: "extract_fan", title: "Extract fan" },
-  { key: "heat_exchanger_speed", title: "Heat exchanger" },
-  { key: "heater_output", title: "Heater" },
-  { key: "mode", title: "Mode" },
-  { key: "filter_alarm", title: "Filter alarm" },
-  { key: "alarm", title: "Alarm" },
+const COMPONENT_PANELS: ComponentPanel[] = [
+  { key: "outdoor_temp", title: "Outdoor air temperature", defaultLabel: "Outdoor air temperature" },
+  { key: "supply_temp", title: "Supply air temperature", defaultLabel: "Supply air temperature" },
+  { key: "extract_temp", title: "Extract air temperature", defaultLabel: "Extract air temperature" },
+  { key: "exhaust_temp", title: "Exhaust air temperature", defaultLabel: "Exhaust air temperature" },
+  { key: "supply_fan", title: "Supply fan", defaultLabel: "Supply fan" },
+  { key: "extract_fan", title: "Extract fan", defaultLabel: "Extract fan" },
+  { key: "heat_exchanger_speed", title: "Heat exchanger", defaultLabel: "Heat exchanger" },
+  { key: "heater_output", title: "Heater output", defaultLabel: "Heater output" },
+  { key: "mode", title: "Mode", defaultLabel: "Mode" },
+  { key: "filter_alarm", title: "Filter alarm", defaultLabel: "Filter alarm" },
+  { key: "alarm", title: "Alarm", defaultLabel: "Alarm" },
 ];
+
+const AIRFLOW_COLOR_FIELDS: Array<{
+  key: keyof VentilationColors;
+  label: string;
+  fallback: string;
+}> = [
+  { key: "outdoor_air", label: "Outdoor air color", fallback: "#63b489" },
+  { key: "supply_air", label: "Supply air color", fallback: "#d99a45" },
+  { key: "extract_air", label: "Extract air color", fallback: "#e5aa6f" },
+  { key: "exhaust_air", label: "Exhaust air color", fallback: "#456f9f" },
+];
+
+const EXCHANGER_OPTIONS: Array<{ value: ExchangerType; label: string }> = [
+  { value: "rotary", label: "Rotary" },
+  { value: "crossflow", label: "Crossflow" },
+  { value: "none", label: "None" },
+];
+
+const FORMATTABLE_KEYS = new Set<ValueBoxKey>([
+  "outdoor_temp",
+  "supply_temp",
+  "extract_temp",
+  "exhaust_temp",
+  "supply_fan",
+  "extract_fan",
+  "heat_exchanger_speed",
+  "heater_output",
+]);
 
 @customElement("ventilation-card-editor")
 export class VentilationCardEditor extends LitElement {
   @property({ attribute: false }) public hass?: HomeAssistant;
+
   @state() private config: LovelaceCardConfig = { type: "custom:ventilation-card" };
 
+  public connectedCallback(): void {
+    super.connectedCallback();
+    void this.loadHomeAssistantElements();
+  }
+
   public setConfig(config: LovelaceCardConfig): void {
-    this.config = { ...config, type: config.type || "custom:ventilation-card" };
+    this.config = {
+      ...config,
+      type: config.type || "custom:ventilation-card",
+      exchanger_type: config.exchanger_type ?? "rotary",
+    };
   }
 
   protected render() {
-    if (!this.hass) return nothing;
+    if (!this.hass) {
+      return nothing;
+    }
 
-    return html`<div class="editor">
-      ${this.renderSection("General", html`
+    return html`
+      <div class="editor">
+        ${this.renderGeneralSection()}
+        ${this.renderComponentsSection()}
+        ${this.renderAirflowColorsSection()}
+      </div>
+    `;
+  }
+
+  private async loadHomeAssistantElements(): Promise<void> {
+    if (customElements.get("ha-entity-picker")) {
+      return;
+    }
+
+    const entitiesCard = customElements.get("hui-entities-card") as
+      | { getConfigElement?: () => Promise<unknown> }
+      | undefined;
+
+    try {
+      await entitiesCard?.getConfigElement?.();
+    } catch (error) {
+      // Home Assistant loads this element in the real editor; local dev may not.
+      console.warn("Unable to preload ha-entity-picker", error);
+    }
+  }
+
+  private renderGeneralSection(): TemplateResult {
+    return this.renderSection(
+      "General",
+      html`
         ${this.renderTextField("Name", this.config.name ?? "", (value) => this.updateRoot("name", value))}
         <ha-select
-          .label=${"Exchanger type"}
+          name="exchanger_type"
+          label="Exchanger type"
           .value=${this.config.exchanger_type ?? "rotary"}
-          @selected=${(e: Event) => this.updateRoot("exchanger_type", (e.target as HTMLSelectElement).value as ExchangerType)}
+          .options=${EXCHANGER_OPTIONS}
+          @selected=${(event: CustomEvent<{ value?: string }>) => this.updateExchangerType(this.eventValue(event))}
+          @change=${(event: Event) => this.updateExchangerType(this.eventValue(event))}
         >
-          <mwc-list-item value="rotary">Rotary</mwc-list-item>
-          <mwc-list-item value="crossflow">Crossflow</mwc-list-item>
-          <mwc-list-item value="none">None</mwc-list-item>
+          ${EXCHANGER_OPTIONS.map((option) => html`<mwc-list-item .value=${option.value}>${option.label}</mwc-list-item>`)}
         </ha-select>
-      `)}
-
-      ${this.renderSection("Airflow colors", html`
-        ${this.renderColorField("Outdoor air / Inntak color", this.config.colors?.outdoor_air ?? "", (value) => this.updateNested("colors", "outdoor_air", value))}
-        ${this.renderColorField("Supply air / Tilluft color", this.config.colors?.supply_air ?? "", (value) => this.updateNested("colors", "supply_air", value))}
-        ${this.renderColorField("Extract air / Avtrekk color", this.config.colors?.extract_air ?? "", (value) => this.updateNested("colors", "extract_air", value))}
-        ${this.renderColorField("Exhaust air / Avkast color", this.config.colors?.exhaust_air ?? "", (value) => this.updateNested("colors", "exhaust_air", value))}
-      `)}
-
-      ${this.renderSection("Value box defaults", html`
-        ${this.renderColorField("Default value box border color", this.config.value_box?.border_color ?? "", (value) => this.updateNested("value_box", "border_color", value))}
-        ${this.renderColorField("Default value box background color", this.config.value_box?.background_color ?? "", (value) => this.updateNested("value_box", "background_color", value))}
-      `)}
-
-      ${this.renderSection(
-        "Sensors and components",
-        PANELS.map((panel) => this.renderPanel(panel)),
-      )}
-    </div>`;
+      `,
+      true,
+    );
   }
 
-  private renderPanel(panel: PanelDef) {
-    const key = panel.key;
-    return html`<details>
-      <summary>${panel.title}</summary>
-      <div class="fields">
-        <ha-entity-picker
-          .hass=${this.hass}
-          .value=${this.config.entities?.[key] ?? ""}
-          .label=${"Entity"}
-          allow-custom-entity
-          @value-changed=${(event: CustomEvent<{ value?: string }>) => this.updateNested("entities", key, event.detail.value ?? "")}
-        ></ha-entity-picker>
-        ${this.renderTextField("Label override", this.config.labels?.[key] ?? "", (value) => this.updateNested("labels", key, value))}
-        ${this.renderNumberField("Font size", this.config.value_boxes?.[key]?.font_size, (value) => this.updateValueBoxOverride(key, "font_size", value))}
-        ${this.renderColorField("Value box border color", this.config.value_boxes?.[key]?.border_color ?? "", (value) =>
-          this.updateValueBoxOverride(key, "border_color", value))}
+  private renderAirflowColorsSection(): TemplateResult {
+    return this.renderSection(
+      "Airflow colors",
+      html`
+        ${AIRFLOW_COLOR_FIELDS.map((field) =>
+          this.renderColorField(field.label, this.config.colors?.[field.key] ?? "", field.fallback, (value) =>
+            this.updateNestedString("colors", field.key, value),
+          ),
+        )}
+      `,
+    );
+  }
+
+  private renderComponentsSection(): TemplateResult {
+    return this.renderSection(
+      "Sensors and components",
+      html`${COMPONENT_PANELS.map((panel) => this.renderComponentPanel(panel))}`,
+    );
+  }
+
+  private renderComponentPanel(panel: ComponentPanel): TemplateResult {
+    const valueBox = this.config.value_boxes?.[panel.key];
+
+    return html`
+      <details class="component-panel">
+        <summary>
+          <span>${panel.title}</span>
+          <small>${this.config.entities?.[panel.key] || "No entity"}</small>
+        </summary>
+        <div class="panel-fields">
+          ${this.renderSwitchField("Show", this.config.visibility?.[panel.key] !== false, (value) => this.updateNestedBoolean("visibility", panel.key, value))}
+          <ha-entity-picker
+            .hass=${this.hass}
+            .value=${this.config.entities?.[panel.key] ?? ""}
+            .label=${"Entity"}
+            allow-custom-entity
+            ?allow-custom-entity=${true}
+            @value-changed=${(event: CustomEvent<{ value?: string }>) => {
+              event.stopPropagation();
+              this.updateNestedString("entities", panel.key, event.detail.value ?? "");
+            }}
+          ></ha-entity-picker>
+          ${this.renderLabelField(panel.key, panel.defaultLabel)}
+          ${this.renderColorField("Value box border color", valueBox?.border_color ?? "", "#9e9e9e", (value) =>
+            this.updateValueBox(panel.key, "border_color", value),
+          )}
+          ${this.renderNumberField("Font size", valueBox?.font_size, (value) => this.updateValueBox(panel.key, "font_size", value))}
+          ${FORMATTABLE_KEYS.has(panel.key) ? this.renderFormatFields(panel.key) : nothing}
+          ${this.renderComponentAnimationFields(panel.key)}
+        </div>
+      </details>
+    `;
+  }
+
+  private renderComponentAnimationFields(key: ValueBoxKey): TemplateResult | typeof nothing {
+    if (key !== "supply_fan" && key !== "extract_fan" && key !== "heat_exchanger_speed") {
+      return nothing;
+    }
+
+    const settings = this.config.component_settings?.[key];
+    const legacyEnabled = key === "heat_exchanger_speed" ? this.config.animations?.rotor_enabled !== false : this.config.animations?.fans_enabled !== false;
+    const legacySpeed = key === "heat_exchanger_speed" ? this.config.animations?.rotor_max_speed : this.config.animations?.fan_max_speed;
+    const animationMaxSpeed = settings?.animation_max_speed ?? settings?.animation_speed ?? legacySpeed ?? 100;
+
+    return html`
+      <div class="field-group">
+        ${this.renderSwitchField("Enable animation", settings?.animation_enabled ?? legacyEnabled, (value) =>
+          this.updateComponentSetting(key, "animation_enabled", value),
+        )}
+        ${this.renderAnimationSpeedField(key, this.clampNumber(animationMaxSpeed, 0, 100))}
       </div>
-    </details>`;
+    `;
   }
 
-  private renderSection(title: string, content: unknown) {
-    return html`<section class="section"><h3>${title}</h3><div class="fields">${content}</div></section>`;
+  private renderAnimationSpeedField(key: "supply_fan" | "extract_fan" | "heat_exchanger_speed", value: number): TemplateResult {
+    const inputId = `animation-max-speed-${key}`;
+
+    return html`
+      <div class="animation-speed-field">
+        <label for=${inputId}>Animation speed at 100%:</label>
+        <div class="animation-speed-input-row">
+          <input
+            id=${inputId}
+            type="number"
+            min="0"
+            max="100"
+            step="1"
+            .value=${String(value)}
+            @input=${(event: Event) => this.updateAnimationMaxSpeed(key, (event.target as HTMLInputElement).value)}
+            @change=${(event: Event) => this.updateAnimationMaxSpeed(key, (event.target as HTMLInputElement).value)}
+          />
+          <span aria-hidden="true">%</span>
+        </div>
+        <small>Percent of full animation speed.</small>
+      </div>
+    `;
   }
 
-  private renderTextField(label: string, value: string, onChange: (value: string) => void) {
-    return html`<ha-textfield .label=${label} .value=${value} @input=${(event: Event) => onChange((event.target as HTMLInputElement).value)}></ha-textfield>`;
+  private renderFormatFields(key: ValueBoxKey): TemplateResult {
+    const format = this.config.format?.[key];
+
+    return html`
+      <div class="field-group">
+        ${this.renderNumberField(
+          "Decimals",
+          format?.decimals,
+          (value) => this.updateFormat(key, "decimals", value == null ? undefined : Math.round(value)),
+          { min: 0, max: 4, placeholder: "Default" },
+        )}
+        ${this.renderSwitchField("Show unit", format?.show_unit !== false, (value) => this.updateFormat(key, "show_unit", value))}
+      </div>
+    `;
   }
 
-  private renderNumberField(label: string, value: number | undefined, onChange: (value?: number) => void) {
-    return html`<ha-textfield .label=${label} .value=${value != null ? String(value) : ""} type="number" @input=${(event: Event) => {
-      const raw = (event.target as HTMLInputElement).value.trim();
-      onChange(raw ? Number(raw) : undefined);
-    }}></ha-textfield>`;
+  private renderSection(title: string, content: TemplateResult, open = false): TemplateResult {
+    return html`
+      <details class="section" ?open=${open}>
+        <summary class="section-summary">${title}</summary>
+        <div class="fields">${content}</div>
+      </details>
+    `;
   }
 
-  private renderColorField(label: string, value: string, onChange: (value: string) => void) {
-    return html`<div class="color-row">
-      <ha-textfield .label=${label} .value=${value} placeholder="Default" @input=${(event: Event) => onChange((event.target as HTMLInputElement).value)}></ha-textfield>
-      <input aria-label=${label} type="color" .value=${this.toColorValue(value)} @input=${(event: Event) => onChange((event.target as HTMLInputElement).value)} />
-      <button type="button" @click=${() => onChange("")}>Clear</button>
-    </div>`;
+  private renderTextField(label: string, value: string, onChange: (value: string) => void, placeholder = ""): TemplateResult {
+    return html`
+      <ha-textfield
+        .label=${label}
+        .value=${value}
+        .placeholder=${placeholder}
+        @value-changed=${(event: CustomEvent<{ value?: string }>) => onChange(event.detail.value ?? "")}
+        @input=${(event: Event) => onChange((event.target as HTMLInputElement).value)}
+        @change=${(event: Event) => onChange((event.target as HTMLInputElement).value)}
+      ></ha-textfield>
+    `;
   }
 
-  private toColorValue(value: string): string {
-    return /^#[0-9A-F]{6}$/i.test(value) ? value : "#5fcf9b";
+  private renderLabelField(key: ValueBoxKey, defaultLabel: string): TemplateResult {
+    const configuredLabel = this.config.labels?.[key] ?? "";
+
+    return html`
+      <div class="label-field">
+        <label for=${`label-${key}`}>Label</label>
+        <input
+          id=${`label-${key}`}
+          type="text"
+          .value=${configuredLabel}
+          placeholder=${defaultLabel}
+          @input=${(event: Event) => this.updateLabel(key, (event.target as HTMLInputElement).value)}
+          @change=${(event: Event) => this.updateLabel(key, (event.target as HTMLInputElement).value)}
+        />
+        <small>Default: ${defaultLabel}</small>
+      </div>
+    `;
   }
 
-  private updateRoot(key: "name" | "exchanger_type", value: string): void {
-    const next: LovelaceCardConfig = { ...this.config };
-    if (!value.trim()) delete next[key]; else next[key] = value;
+  private renderNumberField(
+    label: string,
+    value: number | undefined,
+    onChange: (value?: number) => void,
+    options: { min?: number; max?: number; step?: number; placeholder?: string; suffix?: string; helperText?: string } = {},
+  ): TemplateResult {
+    return html`
+      <div class=${options.helperText ? "number-field has-helper" : "number-field"}>
+        <ha-textfield
+          .label=${label}
+          .value=${value == null ? "" : String(value)}
+          type="number"
+          min=${String(options.min ?? 8)}
+          max=${String(options.max ?? 24)}
+          step=${String(options.step ?? 1)}
+          .placeholder=${options.placeholder ?? "12"}
+          .suffix=${options.suffix ?? ""}
+          @input=${(event: Event) => {
+            const raw = (event.target as HTMLInputElement).value.trim();
+            onChange(raw ? Number(raw) : undefined);
+          }}
+          @change=${(event: Event) => {
+            const raw = (event.target as HTMLInputElement).value.trim();
+            onChange(raw ? Number(raw) : undefined);
+          }}
+        ></ha-textfield>
+        ${options.helperText ? html`<small>${options.helperText}</small>` : nothing}
+      </div>
+    `;
+  }
+
+  private renderSwitchField(label: string, checked: boolean, onChange: (value: boolean) => void): TemplateResult {
+    return html`
+      <label class="switch-row">
+        <span>${label}</span>
+        <ha-switch
+          .checked=${checked}
+          @change=${(event: Event) => onChange((event.target as HTMLInputElement).checked)}
+        ></ha-switch>
+      </label>
+    `;
+  }
+
+  private renderColorField(label: string, value: string, fallback: string, onChange: (value: string) => void): TemplateResult {
+    return html`
+      <div class="color-row">
+        <label class="color-field">
+          <span>${label}</span>
+          <ha-textfield
+            .value=${value}
+            placeholder="Default"
+            @input=${(event: Event) => onChange((event.target as HTMLInputElement).value)}
+            @change=${(event: Event) => onChange((event.target as HTMLInputElement).value)}
+          ></ha-textfield>
+        </label>
+        <input
+          type="color"
+          aria-label=${label}
+          .value=${this.colorInputValue(value, fallback)}
+          @input=${(event: Event) => onChange((event.target as HTMLInputElement).value)}
+        />
+        <ha-button appearance="plain" @click=${() => onChange("")}>Clear</ha-button>
+      </div>
+    `;
+  }
+
+  private colorInputValue(value: string, fallback: string): string {
+    return /^#[0-9a-f]{6}$/i.test(value) ? value : fallback;
+  }
+
+  private eventValue(event: Event | CustomEvent<{ value?: string }>): string {
+    const customValue = (event as CustomEvent<{ value?: string }>).detail?.value;
+    if (customValue != null) {
+      return customValue;
+    }
+
+    return ((event.target as HTMLInputElement | HTMLSelectElement | null)?.value ?? "").trim();
+  }
+
+  private updateRoot(key: "name", value: string): void {
+    const next = this.cloneConfig();
+    const trimmed = value.trim();
+
+    if (trimmed) {
+      next[key] = value;
+    } else {
+      delete next[key];
+    }
+
     this.updateConfig(next);
   }
 
-  private updateNested(
+  private updateExchangerType(value: string): void {
+    if (!["rotary", "crossflow", "none"].includes(value)) {
+      return;
+    }
+
+    this.updateConfig({ ...this.cloneConfig(), exchanger_type: value as ExchangerType });
+  }
+
+  private updateLabel(key: ValueBoxKey, value: string): void {
+    const next = this.cloneConfig();
+    const labels = { ...(next.labels ?? {}) };
+    const trimmed = value.trim();
+
+    if (!trimmed) {
+      delete labels[key];
+    } else {
+      labels[key] = value;
+    }
+
+    if (Object.keys(labels).length > 0) {
+      next.labels = labels;
+    } else {
+      delete next.labels;
+    }
+
+    this.updateConfig(next);
+  }
+
+  private updateNestedString(
     section: "entities" | "labels" | "colors" | "value_box",
     key: keyof VentilationEntities | keyof VentilationLabels | keyof VentilationColors | keyof VentilationValueBoxConfig,
     value: string,
   ): void {
-    const next: LovelaceCardConfig = { ...this.config };
+    const next = this.cloneConfig();
     const current = { ...(next[section] ?? {}) } as Record<string, string>;
-    if (!value.trim()) delete current[key as string]; else current[key as string] = value;
-    if (Object.keys(current).length === 0) delete next[section]; else next[section] = current;
+    const trimmed = value.trim();
+
+    if (trimmed) {
+      current[key as string] = value;
+    } else {
+      delete current[key as string];
+    }
+
+    if (Object.keys(current).length > 0) {
+      next[section] = current;
+    } else {
+      delete next[section];
+    }
+
     this.updateConfig(next);
   }
 
-  private updateValueBoxOverride(key: ValueBoxKey, field: keyof VentilationValueBoxOverride, value: string | number | undefined): void {
-    const next: LovelaceCardConfig = { ...this.config };
+  private updateValueBox(key: ValueBoxKey, field: keyof VentilationValueBoxOverride, value: string | number | undefined): void {
+    const next = this.cloneConfig();
     const boxes = { ...(next.value_boxes ?? {}) };
     const entry = { ...(boxes[key] ?? {}) };
-    const empty = typeof value === "string" ? !value.trim() : value == null || Number.isNaN(value);
-    if (empty) {
-      delete entry[field];
+
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      if (trimmed) {
+        this.setValueBoxField(entry, field, value);
+      } else {
+        delete entry[field];
+      }
+    } else if (value != null && Number.isFinite(value)) {
+      this.setValueBoxField(entry, field, value);
     } else {
-      (entry as Record<string, string | number>)[field] = value as string | number;
+      delete entry[field];
     }
-    if (Object.keys(entry).length === 0) delete boxes[key]; else boxes[key] = entry;
-    if (Object.keys(boxes).length === 0) delete next.value_boxes; else next.value_boxes = boxes;
+
+    if (Object.keys(entry).length > 0) {
+      boxes[key] = entry;
+    } else {
+      delete boxes[key];
+    }
+
+    if (Object.keys(boxes).length > 0) {
+      next.value_boxes = boxes;
+    } else {
+      delete next.value_boxes;
+    }
+
     this.updateConfig(next);
+  }
+
+  private updateNestedBoolean(section: "visibility" | "animations", key: keyof VentilationVisibility | keyof VentilationAnimationConfig, value: boolean): void {
+    const next = this.cloneConfig();
+    const current = { ...(next[section] ?? {}) } as Record<string, boolean>;
+    current[key as string] = value;
+    if (section === "visibility") {
+      next.visibility = current as VentilationVisibility;
+    } else {
+      next.animations = current as VentilationAnimationConfig;
+    }
+    this.updateConfig(next);
+  }
+
+  private updateNestedNumber(section: "animations", key: keyof VentilationAnimationConfig, value: number | undefined, min: number, max: number): void {
+    const next = this.cloneConfig();
+    const current = { ...(next[section] ?? {}) } as Record<string, number | boolean>;
+
+    if (value == null || !Number.isFinite(value)) {
+      delete current[key as string];
+    } else {
+      current[key as string] = this.clampNumber(value, min, max);
+    }
+
+    if (Object.keys(current).length > 0) {
+      next[section] = current as VentilationAnimationConfig;
+    } else {
+      delete next[section];
+    }
+
+    this.updateConfig(next);
+  }
+
+  private updateFormat(key: ValueBoxKey, field: keyof VentilationFormatConfig, value: number | boolean | undefined): void {
+    const next = this.cloneConfig();
+    const formats = { ...(next.format ?? {}) };
+    const entry = { ...(formats[key] ?? {}) };
+
+    if (value == null || (typeof value === "number" && !Number.isFinite(value))) {
+      delete entry[field];
+    } else if (field === "decimals" && typeof value === "number") {
+      entry.decimals = this.clampNumber(value, 0, 4);
+    } else if (field === "show_unit" && typeof value === "boolean") {
+      entry.show_unit = value;
+    }
+
+    if (Object.keys(entry).length > 0) {
+      formats[key] = entry;
+    } else {
+      delete formats[key];
+    }
+
+    if (Object.keys(formats).length > 0) {
+      next.format = formats;
+    } else {
+      delete next.format;
+    }
+
+    this.updateConfig(next);
+  }
+
+  private updateComponentSetting(key: "supply_fan" | "extract_fan" | "heat_exchanger_speed", field: keyof VentilationComponentSettings, value: boolean | number | undefined): void {
+    const next = this.cloneConfig();
+    const allSettings = { ...(next.component_settings ?? {}) };
+    const settings = { ...(allSettings[key] ?? {}) };
+
+    if (value == null || (typeof value === "number" && !Number.isFinite(value))) {
+      delete settings[field];
+    } else if (field === "animation_enabled" && typeof value === "boolean") {
+      settings.animation_enabled = value;
+    } else if (field === "animation_max_speed" && typeof value === "number") {
+      settings.animation_max_speed = this.clampNumber(value, 0, 100);
+      delete settings.animation_speed;
+    } else if (field === "animation_speed" && typeof value === "number") {
+      settings.animation_speed = this.clampNumber(value, 10, 150);
+    }
+
+    if (Object.keys(settings).length > 0) {
+      allSettings[key] = settings;
+    } else {
+      delete allSettings[key];
+    }
+
+    if (Object.keys(allSettings).length > 0) {
+      next.component_settings = allSettings;
+    } else {
+      delete next.component_settings;
+    }
+
+    this.updateConfig(next);
+  }
+
+  private updateAnimationMaxSpeed(key: "supply_fan" | "extract_fan" | "heat_exchanger_speed", rawValue: string): void {
+    const value = rawValue.trim() === "" ? undefined : Number(rawValue);
+    this.updateComponentSetting(key, "animation_max_speed", value);
+  }
+
+  private setValueBoxField(entry: VentilationValueBoxOverride, field: keyof VentilationValueBoxOverride, value: string | number): void {
+    if (field === "border_color" && typeof value === "string") {
+      entry.border_color = value;
+    }
+
+    if (field === "font_size" && typeof value === "number") {
+      entry.font_size = value;
+    }
+  }
+
+  private cloneConfig(): LovelaceCardConfig {
+    const next: LovelaceCardConfig = {
+      ...this.config,
+    };
+
+    if (this.config.entities) {
+      next.entities = { ...this.config.entities };
+    }
+
+    if (this.config.labels) {
+      next.labels = { ...this.config.labels };
+    }
+
+    if (this.config.colors) {
+      next.colors = { ...this.config.colors };
+    }
+
+    if (this.config.value_box) {
+      next.value_box = { ...this.config.value_box };
+    }
+
+    if (this.config.value_boxes) {
+      next.value_boxes = Object.fromEntries(
+        Object.entries(this.config.value_boxes ?? {}).map(([key, value]) => [key, { ...(value ?? {}) }]),
+      ) as LovelaceCardConfig["value_boxes"];
+    }
+
+    if (this.config.visibility) {
+      next.visibility = { ...this.config.visibility };
+    }
+
+    if (this.config.animations) {
+      next.animations = { ...this.config.animations };
+    }
+
+    if (this.config.component_settings) {
+      next.component_settings = Object.fromEntries(
+        Object.entries(this.config.component_settings ?? {}).map(([key, value]) => [key, { ...(value ?? {}) }]),
+      ) as LovelaceCardConfig["component_settings"];
+    }
+
+    if (this.config.layout) {
+      next.layout = { ...this.config.layout };
+    }
+
+    if (this.config.format) {
+      next.format = Object.fromEntries(
+        Object.entries(this.config.format ?? {}).map(([key, value]) => [key, { ...(value ?? {}) }]),
+      ) as LovelaceCardConfig["format"];
+    }
+
+    return next;
+  }
+
+  private clampNumber(value: number, min: number, max: number): number {
+    if (!Number.isFinite(value)) {
+      return min;
+    }
+
+    return Math.min(Math.max(value, min), max);
   }
 
   private updateConfig(config: LovelaceCardConfig): void {
     this.config = config;
-    this.dispatchEvent(new CustomEvent("config-changed", { detail: { config: this.config }, bubbles: true, composed: true }));
+    this.dispatchEvent(
+      new CustomEvent("config-changed", {
+        detail: { config },
+        bubbles: true,
+        composed: true,
+      }),
+    );
   }
 
   static styles = css`
-    .editor { display: grid; gap: 16px; }
-    .section { border: 1px solid var(--divider-color, rgba(127, 127, 127, 0.2)); border-radius: 12px; padding: 12px; }
-    h3 { margin: 0 0 12px; font-size: 15px; }
-    .fields { display: grid; gap: 10px; }
-    details { border: 1px solid var(--divider-color, rgba(127, 127, 127, 0.2)); border-radius: 10px; padding: 8px; }
-    summary { cursor: pointer; font-weight: 600; }
-    details .fields { margin-top: 10px; }
-    .color-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 8px; align-items: center; }
+    .editor {
+      display: grid;
+      gap: 16px;
+    }
+
+    .section {
+      border: 1px solid var(--divider-color, rgba(127, 127, 127, 0.2));
+      border-radius: 8px;
+      background: var(--card-background-color, transparent);
+      overflow: hidden;
+    }
+
+    .fields {
+      display: grid;
+      gap: 12px;
+      padding: 12px;
+      border-top: 1px solid var(--divider-color, rgba(127, 127, 127, 0.14));
+    }
+
+    .panel-fields {
+      display: grid;
+      gap: 12px;
+    }
+
+    ha-select,
+    ha-textfield,
+    ha-entity-picker,
+    ha-switch {
+      width: 100%;
+    }
+
+    .switch-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 12px;
+      align-items: center;
+      justify-items: stretch;
+      width: 100%;
+      min-height: 40px;
+      color: var(--primary-text-color);
+      font-size: 14px;
+      line-height: 1.25;
+      text-align: left;
+    }
+
+    .switch-row span {
+      justify-self: start;
+      text-align: left;
+    }
+
+    .switch-row ha-switch {
+      width: auto;
+      justify-self: end;
+    }
+
+    .label-field {
+      display: grid;
+      gap: 4px;
+    }
+
+    .label-field label {
+      color: var(--primary-text-color);
+      font-size: 13px;
+      font-weight: 500;
+      line-height: 1.25;
+    }
+
+    .label-field input {
+      box-sizing: border-box;
+      width: 100%;
+      min-height: 40px;
+      padding: 8px 12px;
+      border: 1px solid var(--divider-color, rgba(127, 127, 127, 0.35));
+      border-radius: 4px;
+      background: var(--mdc-text-field-fill-color, var(--card-background-color, transparent));
+      color: var(--primary-text-color);
+      font: inherit;
+    }
+
+    .label-field input:focus {
+      border-color: var(--primary-color);
+      outline: none;
+    }
+
+    .label-field input::placeholder {
+      color: var(--secondary-text-color);
+      opacity: 0.85;
+    }
+
+    .label-field small {
+      color: var(--secondary-text-color);
+      font-size: 12px;
+      line-height: 1.25;
+    }
+
+    .field-group {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr);
+      gap: 12px;
+      align-items: center;
+    }
+
+    .number-field {
+      display: grid;
+      gap: 4px;
+      min-width: 0;
+    }
+
+    .number-field ha-textfield {
+      width: 100%;
+    }
+
+    .number-field small {
+      color: var(--secondary-text-color);
+      font-size: 12px;
+      line-height: 1.25;
+    }
+
+    .animation-speed-field {
+      display: grid;
+      gap: 4px;
+      min-width: 0;
+    }
+
+    .animation-speed-field label {
+      color: var(--primary-text-color);
+      font-size: 13px;
+      font-weight: 500;
+      line-height: 1.25;
+    }
+
+    .animation-speed-input-row {
+      display: grid;
+      grid-template-columns: minmax(72px, 120px) auto;
+      gap: 8px;
+      align-items: center;
+      justify-content: start;
+    }
+
+    .animation-speed-input-row input {
+      box-sizing: border-box;
+      width: 100%;
+      min-height: 40px;
+      padding: 8px 10px;
+      border: 1px solid var(--divider-color, rgba(127, 127, 127, 0.35));
+      border-radius: 4px;
+      background: var(--mdc-text-field-fill-color, var(--card-background-color, transparent));
+      color: var(--primary-text-color);
+      font: inherit;
+    }
+
+    .animation-speed-input-row input:focus {
+      border-color: var(--primary-color);
+      outline: none;
+    }
+
+    .animation-speed-input-row span,
+    .animation-speed-field small {
+      color: var(--secondary-text-color);
+      font-size: 12px;
+      line-height: 1.25;
+    }
+
+    .color-field {
+      display: grid;
+      gap: 4px;
+      min-width: 0;
+    }
+
+    .color-field span {
+      color: var(--primary-text-color);
+      font-size: 13px;
+      font-weight: 500;
+      line-height: 1.25;
+    }
+
+    .component-panel {
+      border: 1px solid var(--divider-color, rgba(127, 127, 127, 0.2));
+      border-radius: 8px;
+      padding: 0;
+      overflow: hidden;
+    }
+
+    summary {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 12px;
+      align-items: center;
+      min-height: 40px;
+      padding: 0 12px;
+      cursor: pointer;
+      color: var(--primary-text-color);
+      font-weight: 600;
+      list-style-position: inside;
+    }
+
+    .section-summary {
+      min-height: 44px;
+      padding: 0 12px;
+      font-size: 15px;
+    }
+
+    summary small {
+      min-width: 0;
+      max-width: 180px;
+      overflow: hidden;
+      color: var(--secondary-text-color);
+      font-size: 12px;
+      font-weight: 400;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .panel-fields {
+      padding: 8px 12px 12px;
+      border-top: 1px solid var(--divider-color, rgba(127, 127, 127, 0.14));
+    }
+
+    .color-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 44px auto;
+      gap: 8px;
+      align-items: center;
+    }
+
+    input[type="color"] {
+      width: 44px;
+      height: 44px;
+      padding: 2px;
+      border: 1px solid var(--divider-color, rgba(127, 127, 127, 0.35));
+      border-radius: 6px;
+      background: transparent;
+      cursor: pointer;
+    }
+
+    ha-button {
+      white-space: nowrap;
+    }
+
+    @media (max-width: 520px) {
+      summary {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 2px;
+        padding-top: 8px;
+        padding-bottom: 8px;
+      }
+
+      summary small {
+        max-width: 100%;
+      }
+
+      .color-row {
+        grid-template-columns: minmax(0, 1fr) 44px;
+      }
+
+      .field-group {
+        grid-template-columns: minmax(0, 1fr);
+      }
+
+      .color-row ha-button {
+        grid-column: 1 / -1;
+        justify-self: start;
+      }
+    }
   `;
 }

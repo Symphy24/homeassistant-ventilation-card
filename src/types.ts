@@ -1,5 +1,7 @@
 export interface HomeAssistant {
   states: Record<string, HassEntity | undefined>;
+  language?: string;
+  selectedLanguage?: string;
   localize?: (key: string, ...args: unknown[]) => string;
 }
 
@@ -44,15 +46,46 @@ export interface VentilationValueBoxConfig {
 }
 
 export type ValueBoxKey = keyof VentilationEntities;
+export type VentilationLayoutSize = "compact" | "normal" | "large";
 
 export interface VentilationValueBoxOverride {
   border_color?: string;
   font_size?: number;
 }
 
+export type VentilationVisibility = Partial<Record<ValueBoxKey, boolean>>;
+
+export interface VentilationAnimationConfig {
+  enabled?: boolean;
+  airflow_enabled?: boolean;
+  fans_enabled?: boolean;
+  rotor_enabled?: boolean;
+  airflow_max_speed?: number;
+  fan_max_speed?: number;
+  rotor_max_speed?: number;
+  stop_when_zero?: boolean;
+}
+
+export interface VentilationComponentSettings {
+  animation_enabled?: boolean;
+  animation_max_speed?: number;
+  animation_speed?: number;
+}
+
+export interface VentilationLayoutConfig {
+  size?: VentilationLayoutSize;
+}
+
+export interface VentilationFormatConfig {
+  decimals?: number;
+  show_unit?: boolean;
+}
+
 export interface LovelaceCardConfig {
   type: string;
+  grid_options?: unknown;
   name?: string;
+  language?: string;
   exchanger_type?: ExchangerType;
   show_airflow?: boolean;
   entities?: VentilationEntities;
@@ -60,6 +93,11 @@ export interface LovelaceCardConfig {
   colors?: VentilationColors;
   value_box?: VentilationValueBoxConfig;
   value_boxes?: Partial<Record<ValueBoxKey, VentilationValueBoxOverride>>;
+  visibility?: VentilationVisibility;
+  animations?: VentilationAnimationConfig;
+  component_settings?: Partial<Record<ValueBoxKey, VentilationComponentSettings>>;
+  layout?: VentilationLayoutConfig;
+  format?: Partial<Record<ValueBoxKey, VentilationFormatConfig>>;
 }
 
 export interface EntityDisplay {
