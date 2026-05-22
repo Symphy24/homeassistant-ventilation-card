@@ -13,14 +13,7 @@ export interface HassEntity {
   };
 }
 
-export interface LovelaceCardConfig {
-  type: string;
-  name?: string;
-  exchanger_type?: "rotary" | string;
-  show_airflow?: boolean;
-  entities?: VentilationEntities;
-  labels?: Partial<Record<keyof VentilationEntities, string>>;
-}
+export type ExchangerType = "rotary" | "crossflow" | "counterflow" | "none" | (string & {});
 
 export interface VentilationEntities {
   outdoor_temp?: string;
@@ -36,6 +29,32 @@ export interface VentilationEntities {
   mode?: string;
 }
 
+export type VentilationLabels = Partial<Record<keyof VentilationEntities, string>>;
+
+export interface VentilationColors {
+  outdoor_air?: string;
+  supply_air?: string;
+  extract_air?: string;
+  exhaust_air?: string;
+}
+
+export interface VentilationValueBoxConfig {
+  border_color?: string;
+  background_color?: string;
+  text_color?: string;
+}
+
+export interface LovelaceCardConfig {
+  type: string;
+  name?: string;
+  exchanger_type?: ExchangerType;
+  show_airflow?: boolean;
+  entities?: VentilationEntities;
+  labels?: VentilationLabels;
+  colors?: VentilationColors;
+  value_box?: VentilationValueBoxConfig;
+}
+
 export interface EntityDisplay {
   label: string;
   value: string;
@@ -49,5 +68,10 @@ declare global {
       name: string;
       description: string;
     }>;
+  }
+
+  interface HTMLElementTagNameMap {
+    "ventilation-card": HTMLElement;
+    "ventilation-card-editor": HTMLElement;
   }
 }

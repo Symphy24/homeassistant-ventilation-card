@@ -12,7 +12,10 @@ The card is generic and reads configurable Home Assistant entities. Flexit Nordi
 - Rotary heat exchanger, supply fan, extract fan, filters, and heater coil symbols
 - Airflow animation with separate supply and extract speed groups
 - Compact status row for mode, filter alarm, and alarm
+- Visual Lovelace UI editor for card configuration
 - Optional YAML label overrides
+- Optional airflow color overrides
+- Optional value box border/background/text colors
 - Theme-aware styling using Home Assistant CSS variables
 - Safe handling of missing, `unknown`, or `unavailable` entities
 
@@ -73,10 +76,23 @@ labels:
   mode: Modus
   filter_alarm: Filteralarm
   alarm: Alarm
+colors:
+  outdoor_air: "#5fcf9b"
+  supply_air: "#f2a93b"
+  extract_air: "#f6b66b"
+  exhaust_air: "#4f86b8"
+value_box:
+  border_color: ""
+  background_color: ""
+  text_color: ""
 ```
 
-Existing configurations without `labels:` continue to work.
+Existing configurations without `labels:`, `colors:`, or `value_box:` continue to work.
 
+
+You can configure the card through YAML or through the built-in Lovelace visual editor.
+
+All fields are optional except `type`. Missing entity mappings render as `—` in the card while preserving layout.
 ## Configuration
 
 | Option | Type | Default | Description |
@@ -86,6 +102,8 @@ Existing configurations without `labels:` continue to work.
 | `show_airflow` | boolean | `true` | Enables animated airflow. |
 | `entities` | object | `{}` | Home Assistant entity IDs used by the card. |
 | `labels` | object | built-in labels | Optional visible label overrides. |
+| `colors` | object | built-in airflow colors | Optional airflow path colors. |
+| `value_box` | object | theme defaults | Optional value frame border/background/text colors. |
 
 ## Supported Entities
 

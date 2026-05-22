@@ -1,5 +1,6 @@
 import { LitElement, css, html, nothing, svg } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
+import "./ventilation-card-editor";
 import type { EntityDisplay, HassEntity, HomeAssistant, LovelaceCardConfig, VentilationEntities } from "./types";
 
 const UNAVAILABLE_STATES = new Set(["unknown", "unavailable", "none", ""]);
@@ -38,6 +39,21 @@ export class VentilationCard extends LitElement {
     };
   }
 
+
+  public static async getConfigElement(): Promise<HTMLElement> {
+    await customElements.whenDefined("ventilation-card-editor");
+    return document.createElement("ventilation-card-editor");
+  }
+
+  public static getStubConfig(): LovelaceCardConfig {
+    return {
+      type: "custom:ventilation-card",
+      name: "Ventilation",
+      exchanger_type: "rotary",
+      entities: {},
+    };
+  }
+
   public getCardSize(): number {
     return 5;
   }
@@ -59,7 +75,7 @@ export class VentilationCard extends LitElement {
             <h2>${config.name ?? "Ventilation"}</h2>
           </header>
 
-          <div class="schematic" aria-label="Ventilation unit schematic">
+          <div class="schematic" style=${this.schematicStyle()} aria-label="Ventilation unit schematic">
             ${this.renderSchematic(entities, showAirflow)}
           </div>
 
@@ -71,6 +87,26 @@ export class VentilationCard extends LitElement {
         </div>
       </ha-card>
     `;
+  }
+
+
+  private schematicStyle(): string {
+    const colors = this.config?.colors;
+    const valueBox = this.config?.value_box;
+    const styleValues: Array<[string, string | undefined]> = [
+      ["--vc-air-outdoor", colors?.outdoor_air],
+      ["--vc-air-supply", colors?.supply_air],
+      ["--vc-air-extract", colors?.extract_air],
+      ["--vc-air-exhaust", colors?.exhaust_air],
+      ["--vc-value-box-border-color", valueBox?.border_color],
+      ["--vc-value-box-background-color", valueBox?.background_color],
+      ["--vc-value-box-text-color", valueBox?.text_color],
+    ];
+
+    return styleValues
+      .filter(([, value]) => value && value.trim().length > 0)
+      .map(([key, value]) => `${key}: ${value};`)
+      .join(" ");
   }
 
   private renderSchematic(entities: VentilationEntities, showAirflow: boolean) {
@@ -658,9 +694,9 @@ export class VentilationCard extends LitElement {
     }
 
     .svg-badge rect {
-      fill: var(--ha-card-background, var(--card-background-color, #ffffff));
+      fill: var(--vc-value-box-background-color, var(--ha-card-background, var(--card-background-color, #ffffff)));
       fill-opacity: 0.92;
-      stroke: var(--divider-color, rgba(127, 127, 127, 0.56));
+      stroke: var(--vc-value-box-border-color, var(--divider-color, rgba(127, 127, 127, 0.56)));
       stroke-width: 1.35;
     }
 
@@ -692,7 +728,7 @@ export class VentilationCard extends LitElement {
     }
 
     .svg-badge text {
-      fill: var(--primary-text-color, #111);
+      fill: var(--vc-value-box-text-color, var(--primary-text-color, #111));
       dominant-baseline: middle;
     }
 
