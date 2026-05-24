@@ -3,6 +3,7 @@ export interface HomeAssistant {
   language?: string;
   selectedLanguage?: string;
   localize?: (key: string, ...args: unknown[]) => string;
+  callService?: (domain: string, service: string, data?: Record<string, unknown>) => Promise<unknown> | void;
 }
 
 export interface HassEntity {
@@ -25,7 +26,9 @@ export interface VentilationEntities {
   supply_fan?: string;
   extract_fan?: string;
   heat_exchanger_speed?: string;
+  heat_exchanger_efficiency?: string;
   heater_output?: string;
+  supply_temp_before_heater?: string;
   filter_alarm?: string;
   alarm?: string;
   mode?: string;
@@ -47,10 +50,18 @@ export interface VentilationValueBoxConfig {
 
 export type ValueBoxKey = keyof VentilationEntities;
 export type VentilationLayoutSize = "compact" | "normal" | "large";
+export type VentilationAhuSize = "small" | "medium" | "large";
 
 export interface VentilationValueBoxOverride {
   border_color?: string;
   font_size?: number;
+}
+
+export type VentilationPositionOffsetValue = number | string | null;
+
+export interface VentilationPositionOffset {
+  x?: VentilationPositionOffsetValue;
+  y?: VentilationPositionOffsetValue;
 }
 
 export type VentilationVisibility = Partial<Record<ValueBoxKey, boolean>>;
@@ -74,11 +85,22 @@ export interface VentilationComponentSettings {
 
 export interface VentilationLayoutConfig {
   size?: VentilationLayoutSize;
+  ahu_size?: VentilationAhuSize;
+  compact_breakpoint?: number;
 }
 
 export interface VentilationFormatConfig {
   decimals?: number;
   show_unit?: boolean;
+}
+
+export interface VentilationEfficiencyConfig {
+  enabled?: boolean;
+  source?: "entity" | "calculated";
+  has_supply_temp_before_heater?: boolean;
+  clamp_min?: number;
+  clamp_max?: number;
+  decimals?: number;
 }
 
 export interface LovelaceCardConfig {
@@ -93,11 +115,13 @@ export interface LovelaceCardConfig {
   colors?: VentilationColors;
   value_box?: VentilationValueBoxConfig;
   value_boxes?: Partial<Record<ValueBoxKey, VentilationValueBoxOverride>>;
+  position_offsets?: Partial<Record<ValueBoxKey, VentilationPositionOffset>>;
   visibility?: VentilationVisibility;
   animations?: VentilationAnimationConfig;
   component_settings?: Partial<Record<ValueBoxKey, VentilationComponentSettings>>;
   layout?: VentilationLayoutConfig;
   format?: Partial<Record<ValueBoxKey, VentilationFormatConfig>>;
+  efficiency?: VentilationEfficiencyConfig;
 }
 
 export interface EntityDisplay {

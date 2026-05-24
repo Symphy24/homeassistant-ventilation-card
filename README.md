@@ -4,6 +4,18 @@ A modern Home Assistant Lovelace custom card for visualizing ventilation/AHU sys
 
 The card is generic and reads configurable Home Assistant entities. Flexit Nordic L6 is an example use case, but the card is intended to support other residential ventilation and AHU systems as well. The card is frontend-only and does not communicate directly with BACnet, Flexit devices, or any ventilation unit.
 
+## Preview
+
+Examples of the card in different Home Assistant themes and transparency modes.
+
+| Light mode | Dark mode |
+| --- | --- |
+| ![Light mode preview](preview/light-mode-loop.gif) | ![Dark mode preview](preview/dark-mode-loop.gif) |
+
+| Transparent light mode | Transparent dark mode |
+| --- | --- |
+| ![Transparent light mode preview](preview/transparent-light-mode-loop.gif) | ![Transparent dark mode preview](preview/transparent-dark-mode-loop.gif) |
+
 ## Features
 
 - Home Assistant Lovelace custom card: `custom:ventilation-card`
@@ -12,6 +24,8 @@ The card is generic and reads configurable Home Assistant entities. Flexit Nordi
 - Rotary heat exchanger, supply fan, extract fan, filters, and heater coil symbols
 - Airflow animation with separate supply and extract speed groups
 - Compact status row for mode, filter alarm, and alarm
+- Clickable configured value boxes and alarm status items that open Home Assistant more-info
+- Native mode selection for configured `input_select` mode entities
 - Collapsible visual Lovelace UI editor for card configuration, entities, labels, colors, visibility, animations, and formatting
 - English default labels with optional per-component label overrides
 - Optional airflow color overrides
@@ -19,7 +33,10 @@ The card is generic and reads configurable Home Assistant entities. Flexit Nordi
 - Optional airflow and per-component animation controls
 - Optional numeric value formatting
 - Optional per-sensor value box border colors and font sizes
-- Theme-aware styling using Home Assistant CSS variables
+- Optional AHU schematic sizing independent of text and value box size
+- Optional heat exchanger efficiency from a Home Assistant entity or calculation
+- Stable, theme-aware HTML value/status text using Home Assistant CSS variables
+- Responsive compact schematic layout at narrow rendered card widths
 - Safe handling of missing, `unknown`, or `unavailable` entities
 
 ## Installation
@@ -58,15 +75,23 @@ exchanger_type: rotary
 entities:
   outdoor_temp: sensor.flexit_outdoor_temperature
   supply_temp: sensor.flexit_supply_temperature
+  supply_temp_before_heater: sensor.flexit_supply_before_heater
   extract_temp: sensor.flexit_extract_temperature
   exhaust_temp: sensor.flexit_exhaust_temperature
   supply_fan: sensor.flexit_supply_fan
   extract_fan: sensor.flexit_extract_fan
   heat_exchanger_speed: sensor.flexit_heat_exchanger_speed
+  heat_exchanger_efficiency: sensor.flexit_heat_exchanger_efficiency
   heater_output: sensor.flexit_heater_output
   filter_alarm: binary_sensor.flexit_filter_alarm
   alarm: binary_sensor.flexit_alarm
-  mode: sensor.flexit_mode
+  mode: input_select.flexit_dummy_mode
+layout:
+  ahu_size: medium
+  compact_breakpoint: 900
+efficiency:
+  enabled: true
+  source: entity
 labels:
   supply_temp: Tilluft
 colors:
@@ -95,16 +120,20 @@ value_boxes:
   supply_temp:
     border_color: "#f2a93b"
     font_size: 12
+position_offsets:
+  supply_temp:
+    x: 5
+    y: -10
 format:
   supply_temp:
     decimals: 1
     show_unit: true
 ```
 
-Existing configurations without `labels:`, `colors:`, `visibility:`, `animations:`, `component_settings:`, `format:`, or `value_boxes:` continue to work.
+Existing configurations without `labels:`, `colors:`, `visibility:`, `animations:`, `component_settings:`, `format:`, `value_boxes:`, `position_offsets:`, `layout:`, or `efficiency:` options continue to work.
 
 Existing configurations that still contain `language:` are accepted, but the setting is ignored.
-Existing configurations that contain `layout:` are accepted, but layout size is no longer exposed in the visual editor.
+Existing `layout.size` values are tolerated for compatibility. The visual editor exposes `layout.ahu_size` for schematic sizing.
 Existing configurations that contain legacy `value_box:` are accepted as fallback styling, but global value box defaults are no longer exposed in the visual editor.
 
 
@@ -126,6 +155,10 @@ All fields are optional except `type`. Missing entity mappings render as `—` i
 | `component_settings` | object | animation fallback settings | Optional per-component animation settings. |
 | `format` | object | current HA state formatting | Optional per-key decimals and unit display. |
 | `value_boxes` | object | `{}` | Preferred per-entity value frame overrides. |
+| `position_offsets` | object | `{}` | Optional per-value-box X/Y fine-tuning offsets added after the active built-in layout placement. |
+| `layout.ahu_size` | string | `medium` | AHU drawing size: `small`, `medium`, or `large`; value boxes follow their components while their text and borders remain unscaled. |
+| `layout.compact_breakpoint` | number | `900` | Optional rendered-card-width breakpoint in px for switching to compact layout. |
+| `efficiency` | object | disabled | Optional heat exchanger efficiency entity or calculation settings. |
 
 ## Supported Entities
 
@@ -135,15 +168,84 @@ All entities are optional. If an entity is missing, `unknown`, or `unavailable`,
 | --- | --- | --- |
 | `outdoor_temp` | Outdoor air temperature | Outdoor/intake air temperature. |
 | `supply_temp` | Supply air temperature | Supply air temperature. |
+| `supply_temp_before_heater` | Supply temperature before heater | Optional supply temperature measured before electric heating, used for preferred efficiency calculation. |
 | `extract_temp` | Extract air temperature | Extract air temperature. |
 | `exhaust_temp` | Exhaust air temperature | Exhaust/avkast air temperature. |
 | `supply_fan` | Supply fan | Supply fan speed or signal. |
 | `extract_fan` | Extract fan | Extract fan speed or signal. |
 | `heat_exchanger_speed` | Heat exchanger | Rotary heat exchanger speed or signal. |
+| `heat_exchanger_efficiency` | Heat exchanger efficiency | Optional measured/calculated efficiency entity used when `efficiency.source: entity`. |
 | `heater_output` | Heater output | Heater output. |
 | `mode` | Mode | Current ventilation mode. |
 | `filter_alarm` | Filter alarm | Filter alarm entity. |
 | `alarm` | Alarm | General alarm entity. |
+
+## Entity Interaction
+
+When an entity ID is configured, clicking its schematic value box opens Home Assistant's standard more-info dialog. The Filter alarm and Alarm footer items behave the same way, including when the configured entity currently has no available state.
+
+When `entities.mode` is an `input_select` with options in Home Assistant, the Mode footer item displays a dropdown. Selecting an option calls `input_select.select_option` with the configured entity and chosen option. For a non-`input_select` mode entity, the footer falls back to the more-info dialog when an entity ID is configured.
+
+## Heat Exchanger Efficiency
+
+Heat exchanger efficiency is optional and disabled by default, so existing cards retain their previous display until it is enabled. The Heat exchanger editor panel lets you choose the efficiency source: a Home Assistant entity or the card's calculated value.
+
+Use an existing Home Assistant efficiency entity:
+
+```yaml
+entities:
+  heat_exchanger_speed: sensor.flexit_heat_exchanger_speed
+  heat_exchanger_efficiency: sensor.flexit_heat_exchanger_efficiency
+
+efficiency:
+  enabled: true
+  source: entity
+```
+
+Entity mode displays the configured entity state as `Efficiency: 82 %` and does not perform a calculation. Missing, `unknown`, `unavailable`, or non-numeric efficiency entity states display `Efficiency: —`. Percentage entities use zero decimals by default, with `efficiency.decimals` or `format.heat_exchanger_efficiency` available as overrides.
+
+Use calculated efficiency:
+
+```yaml
+entities:
+  outdoor_temp: sensor.flexit_outdoor_temperature
+  supply_temp: sensor.flexit_supply_temperature
+  supply_temp_before_heater: sensor.flexit_supply_before_heater
+  extract_temp: sensor.flexit_extract_temperature
+  exhaust_temp: sensor.flexit_exhaust_temperature
+  heater_output: sensor.flexit_heater_output
+  heat_exchanger_speed: sensor.flexit_heat_exchanger_speed
+
+efficiency:
+  enabled: true
+  source: calculated
+  has_supply_temp_before_heater: true
+  clamp_min: 0
+  clamp_max: 100
+  decimals: 0
+```
+
+For calculated mode, when a valid `entities.supply_temp_before_heater` is enabled, the card uses the preferred supply-side calculation:
+
+```text
+((supply_temp_before_heater - outdoor_temp) / (extract_temp - outdoor_temp)) * 100
+```
+
+Without a valid pre-heater supply sensor, the card requires a valid heater output. When `heater_output < 1`, it uses:
+
+```text
+((supply_temp - outdoor_temp) / (extract_temp - outdoor_temp)) * 100
+```
+
+When the heater is active (`heater_output >= 1`), it avoids heater-influenced supply temperature and uses:
+
+```text
+((extract_temp - exhaust_temp) / (extract_temp - outdoor_temp)) * 100
+```
+
+The calculated result is clamped to `0` through `100` by default and shown inside the heat exchanger value box alongside its speed, for example `Speed: 50 %` and `Efficiency: 82 %`. YAML may override `clamp_min`, `clamp_max`, or `decimals`; otherwise efficiency uses zero decimals, or the heat exchanger formatting decimals when configured. Comma decimal states are accepted. Unknown, unavailable, invalid, non-finite, missing required values, missing heater state when no valid pre-heater sensor is available, or a near-zero denominator display `Efficiency: —`.
+
+For backward compatibility, an existing configuration with `efficiency.enabled: true` and no `efficiency.source` continues to use calculated mode. A configured `source` displays efficiency unless `efficiency.enabled: false` explicitly disables it.
 
 ## Optional Labels
 
@@ -226,6 +328,7 @@ format:
 ```
 
 `decimals` applies only to numeric states. Non-numeric states are displayed as-is. `show_unit: false` hides `unit_of_measurement`.
+Numeric entity states whose Home Assistant unit is `%` display with zero decimals by default. Configure `format.<key>.decimals` to explicitly override that behavior; temperature and other non-percentage states keep their existing state formatting unless configured.
 
 ## Optional Value Boxes
 
@@ -242,6 +345,37 @@ value_boxes:
 
 The legacy `value_box:` section is still supported as a fallback for shared `border_color` and `background_color`, but the visual editor now focuses on per-sensor `value_boxes`. Per-item `value_boxes.<key>.border_color` overrides `value_box.border_color`.
 
+## Optional Position Tuning
+
+The card includes built-in tuned value-box positions for both wide and compact layouts. Use `position_offsets:` only to fine-tune those defaults while keeping the anchor-based layout. Offsets are added after the built-in position for the active layout; positive `x` moves a box right, negative `x` moves it left, positive `y` moves it down, and negative `y` moves it up.
+
+```yaml
+position_offsets:
+  supply_temp:
+    x: 5
+    y: -10
+```
+
+The visual editor exposes Position X offset and Position Y offset for temperature, fan, heat exchanger, and heater value boxes. These optional fields are additional fine-tuning adjustments and work in both wide and compact layouts at every AHU size. A null, empty, or invalid X/Y value is treated as `0`. Remove temporary tuning values previously used to establish the defaults before assessing the built-in layout, otherwise they will be added again.
+
+## Optional AHU Size
+
+Set the schematic size without changing value box frames or text:
+
+```yaml
+layout:
+  ahu_size: medium
+  compact_breakpoint: 900
+```
+
+The visual editor provides Small, Medium, and Large options. Their AHU drawing scales are `75%`, `100%`, and `125%`; Large is limited to `125%` so ducts and components remain clean within the card. Value boxes are positioned from their associated duct/component anchors, so they follow AHU size changes while using stable Home Assistant-themed text and border sizes rather than scaling with the SVG. `compact_breakpoint` is optional and lets you tune when compact placement activates. The schematic does not draw a separate faint internal AHU casing outline.
+
+## Dashboard Sizing
+
+The dashboard layout controls card width through `grid_options`; the card preserves user-provided `grid_options` and does not change them at runtime. Home Assistant's documented custom-card grid API exposes sizing recommendations for a standard 12-column Sections grid, so the card does not attempt to force a custom 24-column minimum. For best readability in Sections view layouts that offer a wider column range, use at least 24 columns for this card.
+
+The card observes its rendered width and switches to a compact schematic layout below `layout.compact_breakpoint`, defaulting to `900px`. Use the visual editor setting to keep compact placement active at wider intermediate card widths when appropriate for a dashboard. Compact mode uses a reduced-height schematic and tighter separated label rows rather than oversized vertical spacing. Value box and footer text uses the Home Assistant theme font family and a stable `14px` default size, so compact mode does not reduce text to unreadable SVG-scaled sizes. Individual configured `value_boxes.<key>.font_size` overrides remain available for values.
+
 ## Development
 
 ```bash
@@ -254,6 +388,6 @@ The built card is generated at `dist/ventilation-card.js`.
 ## Notes
 
 - This is a frontend-only Lovelace card.
-- The card reads Home Assistant entity states only.
+- The card reads Home Assistant entity states and invokes standard Home Assistant UI/service interactions such as more-info and `input_select.select_option`.
 - Missing or unavailable entities render as `—`.
-- BACnet, Modbus, Flexit integration, and other device communication must be handled by Home Assistant integrations or external systems.
+- The card does not perform direct BACnet, Modbus, Flexit, or other device communication; that remains the responsibility of Home Assistant integrations or external systems.

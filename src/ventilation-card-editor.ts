@@ -5,12 +5,16 @@ import type {
   HomeAssistant,
   LovelaceCardConfig,
   ValueBoxKey,
+  VentilationAhuSize,
   VentilationAnimationConfig,
   VentilationColors,
   VentilationComponentSettings,
   VentilationEntities,
+  VentilationEfficiencyConfig,
   VentilationFormatConfig,
   VentilationLabels,
+  VentilationPositionOffset,
+  VentilationPositionOffsetValue,
   VentilationVisibility,
   VentilationValueBoxConfig,
   VentilationValueBoxOverride,
@@ -53,6 +57,17 @@ const EXCHANGER_OPTIONS: Array<{ value: ExchangerType; label: string }> = [
   { value: "none", label: "None" },
 ];
 
+const AHU_SIZE_OPTIONS: Array<{ value: VentilationAhuSize; label: string }> = [
+  { value: "small", label: "Small" },
+  { value: "medium", label: "Medium" },
+  { value: "large", label: "Large" },
+];
+
+const EFFICIENCY_SOURCE_OPTIONS: Array<{ value: "entity" | "calculated"; label: string }> = [
+  { value: "entity", label: "Entity" },
+  { value: "calculated", label: "Calculated" },
+];
+
 const FORMATTABLE_KEYS = new Set<ValueBoxKey>([
   "outdoor_temp",
   "supply_temp",
@@ -63,6 +78,9 @@ const FORMATTABLE_KEYS = new Set<ValueBoxKey>([
   "heat_exchanger_speed",
   "heater_output",
 ]);
+
+const POSITIONABLE_KEYS = FORMATTABLE_KEYS;
+const DEFAULT_COMPACT_LAYOUT_BREAKPOINT = 900;
 
 @customElement("ventilation-card-editor")
 export class VentilationCardEditor extends LitElement {
@@ -129,6 +147,29 @@ export class VentilationCardEditor extends LitElement {
         >
           ${EXCHANGER_OPTIONS.map((option) => html`<mwc-list-item .value=${option.value}>${option.label}</mwc-list-item>`)}
         </ha-select>
+        <ha-select
+          name="ahu_size"
+          label="AHU size"
+          .value=${this.config.layout?.ahu_size ?? "medium"}
+          .options=${AHU_SIZE_OPTIONS}
+          @selected=${(event: CustomEvent<{ value?: string }>) => this.updateAhuSize(this.eventValue(event))}
+          @change=${(event: Event) => this.updateAhuSize(this.eventValue(event))}
+        >
+          ${AHU_SIZE_OPTIONS.map((option) => html`<mwc-list-item .value=${option.value}>${option.label}</mwc-list-item>`)}
+        </ha-select>
+        ${this.renderNumberField(
+          "Compact layout breakpoint",
+          this.config.layout?.compact_breakpoint,
+          (value) => this.updateCompactBreakpoint(value),
+          {
+            min: 500,
+            max: 1200,
+            step: 10,
+            placeholder: String(DEFAULT_COMPACT_LAYOUT_BREAKPOINT),
+            suffix: "px",
+            helperText: "Switch to compact layout below this card width in px.",
+          },
+        )}
       `,
       true,
     );
@@ -176,11 +217,13 @@ export class VentilationCardEditor extends LitElement {
               this.updateNestedString("entities", panel.key, event.detail.value ?? "");
             }}
           ></ha-entity-picker>
+          ${panel.key === "heat_exchanger_speed" ? this.renderEfficiencyFields() : nothing}
           ${this.renderLabelField(panel.key, panel.defaultLabel)}
           ${this.renderColorField("Value box border color", valueBox?.border_color ?? "", "#9e9e9e", (value) =>
             this.updateValueBox(panel.key, "border_color", value),
           )}
           ${this.renderNumberField("Font size", valueBox?.font_size, (value) => this.updateValueBox(panel.key, "font_size", value))}
+          ${POSITIONABLE_KEYS.has(panel.key) ? this.renderPositionOffsetFields(panel.key) : nothing}
           ${FORMATTABLE_KEYS.has(panel.key) ? this.renderFormatFields(panel.key) : nothing}
           ${this.renderComponentAnimationFields(panel.key)}
         </div>
@@ -204,6 +247,73 @@ export class VentilationCardEditor extends LitElement {
           this.updateComponentSetting(key, "animation_enabled", value),
         )}
         ${this.renderAnimationSpeedField(key, this.clampNumber(animationMaxSpeed, 0, 100))}
+      </div>
+    `;
+  }
+
+  private renderEfficiencyFields(): TemplateResult {
+    const efficiency = this.config.efficiency;
+    const source = efficiency?.source === "entity" ? "entity" : "calculated";
+    const visible = efficiency?.enabled !== false && (efficiency?.enabled === true || efficiency?.source != null);
+    const hasBeforeHeaterSensor = efficiency?.has_supply_temp_before_heater === true;
+
+    return html`
+      <div class="feature-fields">
+        <h4>Heat exchanger efficiency</h4>
+        ${this.renderSwitchField("Show efficiency", visible, (value) =>
+          this.updateEfficiency("enabled", value),
+        )}
+        <ha-select
+          name="efficiency_source"
+          label="Efficiency source"
+          .value=${source}
+          .options=${EFFICIENCY_SOURCE_OPTIONS}
+          @selected=${(event: CustomEvent<{ value?: string }>) => this.updateEfficiencySource(this.eventValue(event))}
+          @change=${(event: Event) => this.updateEfficiencySource(this.eventValue(event))}
+        >
+          ${EFFICIENCY_SOURCE_OPTIONS.map((option) => html`<mwc-list-item .value=${option.value}>${option.label}</mwc-list-item>`)}
+        </ha-select>
+        ${source === "entity"
+          ? html`
+              <ha-entity-picker
+                .hass=${this.hass}
+                .value=${this.config.entities?.heat_exchanger_efficiency ?? ""}
+                .label=${"Efficiency entity"}
+                allow-custom-entity
+                ?allow-custom-entity=${true}
+                @value-changed=${(event: CustomEvent<{ value?: string }>) => {
+                  event.stopPropagation();
+                  this.updateNestedString("entities", "heat_exchanger_efficiency", event.detail.value ?? "");
+                }}
+              ></ha-entity-picker>
+            `
+          : html`
+              ${this.renderSwitchField("Has supply temperature before heater", hasBeforeHeaterSensor, (value) =>
+                this.updateEfficiency("has_supply_temp_before_heater", value),
+              )}
+              ${hasBeforeHeaterSensor
+                ? html`
+                    <ha-entity-picker
+                      .hass=${this.hass}
+                      .value=${this.config.entities?.supply_temp_before_heater ?? ""}
+                      .label=${"Supply temperature before heater"}
+                      allow-custom-entity
+                      ?allow-custom-entity=${true}
+                      @value-changed=${(event: CustomEvent<{ value?: string }>) => {
+                        event.stopPropagation();
+                        this.updateNestedString("entities", "supply_temp_before_heater", event.detail.value ?? "");
+                      }}
+                    ></ha-entity-picker>
+                  `
+                : nothing}
+            `}
+        ${this.renderNumberField(
+          "Efficiency decimals",
+          efficiency?.decimals,
+          (value) => this.updateEfficiency("decimals", value == null ? undefined : Math.round(value)),
+          { min: 0, max: 4, placeholder: "0" },
+        )}
+        <small class="feature-help">Efficiency is shown in the heat exchanger value box when enabled.</small>
       </div>
     `;
   }
@@ -244,6 +354,28 @@ export class VentilationCardEditor extends LitElement {
           { min: 0, max: 4, placeholder: "Default" },
         )}
         ${this.renderSwitchField("Show unit", format?.show_unit !== false, (value) => this.updateFormat(key, "show_unit", value))}
+      </div>
+    `;
+  }
+
+  private renderPositionOffsetFields(key: ValueBoxKey): TemplateResult {
+    const offsets = this.config.position_offsets?.[key];
+
+    return html`
+      <div class="field-group position-offset-fields">
+        ${this.renderNumberField("Position X offset", this.positionOffsetValue(offsets?.x), (value) => this.updatePositionOffset(key, "x", value), {
+          min: -200,
+          max: 200,
+          step: 1,
+          placeholder: "0",
+        })}
+        ${this.renderNumberField("Position Y offset", this.positionOffsetValue(offsets?.y), (value) => this.updatePositionOffset(key, "y", value), {
+          min: -200,
+          max: 200,
+          step: 1,
+          placeholder: "0",
+        })}
+        <small class="position-offset-help">Fine-tunes this value box position relative to the default layout.</small>
       </div>
     `;
   }
@@ -359,6 +491,19 @@ export class VentilationCardEditor extends LitElement {
     return /^#[0-9a-f]{6}$/i.test(value) ? value : fallback;
   }
 
+  private positionOffsetValue(value: VentilationPositionOffsetValue | undefined): number | undefined {
+    if (typeof value === "number") {
+      return Number.isFinite(value) ? value : undefined;
+    }
+
+    if (typeof value === "string" && value.trim().length > 0) {
+      const numeric = Number(value);
+      return Number.isFinite(numeric) ? numeric : undefined;
+    }
+
+    return undefined;
+  }
+
   private eventValue(event: Event | CustomEvent<{ value?: string }>): string {
     const customValue = (event as CustomEvent<{ value?: string }>).detail?.value;
     if (customValue != null) {
@@ -387,6 +532,72 @@ export class VentilationCardEditor extends LitElement {
     }
 
     this.updateConfig({ ...this.cloneConfig(), exchanger_type: value as ExchangerType });
+  }
+
+  private updateAhuSize(value: string): void {
+    if (!["small", "medium", "large"].includes(value)) {
+      return;
+    }
+
+    const next = this.cloneConfig();
+    next.layout = {
+      ...(next.layout ?? {}),
+      ahu_size: value as VentilationAhuSize,
+    };
+    this.updateConfig(next);
+  }
+
+  private updateCompactBreakpoint(value?: number): void {
+    const next = this.cloneConfig();
+    const layout = { ...(next.layout ?? {}) };
+
+    if (value == null || !Number.isFinite(value)) {
+      delete layout.compact_breakpoint;
+    } else {
+      layout.compact_breakpoint = this.clampNumber(value, 500, 1200);
+    }
+
+    if (Object.keys(layout).length > 0) {
+      next.layout = layout;
+    } else {
+      delete next.layout;
+    }
+
+    this.updateConfig(next);
+  }
+
+  private updateEfficiency(field: keyof VentilationEfficiencyConfig, value: boolean | number | undefined): void {
+    const next = this.cloneConfig();
+    const efficiency = { ...(next.efficiency ?? {}) };
+
+    if (value == null || (typeof value === "number" && !Number.isFinite(value))) {
+      delete efficiency[field];
+    } else if ((field === "enabled" || field === "has_supply_temp_before_heater") && typeof value === "boolean") {
+      efficiency[field] = value;
+    } else if (field === "decimals" && typeof value === "number") {
+      efficiency.decimals = this.clampNumber(value, 0, 4);
+    }
+
+    if (Object.keys(efficiency).length > 0) {
+      next.efficiency = efficiency;
+    } else {
+      delete next.efficiency;
+    }
+
+    this.updateConfig(next);
+  }
+
+  private updateEfficiencySource(value: string): void {
+    if (value !== "entity" && value !== "calculated") {
+      return;
+    }
+
+    const next = this.cloneConfig();
+    next.efficiency = {
+      ...(next.efficiency ?? {}),
+      source: value,
+    };
+    this.updateConfig(next);
   }
 
   private updateLabel(key: ValueBoxKey, value: string): void {
@@ -461,6 +672,32 @@ export class VentilationCardEditor extends LitElement {
       next.value_boxes = boxes;
     } else {
       delete next.value_boxes;
+    }
+
+    this.updateConfig(next);
+  }
+
+  private updatePositionOffset(key: ValueBoxKey, axis: keyof VentilationPositionOffset, value?: number): void {
+    const next = this.cloneConfig();
+    const allOffsets = { ...(next.position_offsets ?? {}) };
+    const offsets = { ...(allOffsets[key] ?? {}) };
+
+    if (value == null || !Number.isFinite(value)) {
+      delete offsets[axis];
+    } else {
+      offsets[axis] = this.clampNumber(value, -200, 200);
+    }
+
+    if (Object.keys(offsets).length > 0) {
+      allOffsets[key] = offsets;
+    } else {
+      delete allOffsets[key];
+    }
+
+    if (Object.keys(allOffsets).length > 0) {
+      next.position_offsets = allOffsets;
+    } else {
+      delete next.position_offsets;
     }
 
     this.updateConfig(next);
@@ -598,6 +835,12 @@ export class VentilationCardEditor extends LitElement {
       ) as LovelaceCardConfig["value_boxes"];
     }
 
+    if (this.config.position_offsets) {
+      next.position_offsets = Object.fromEntries(
+        Object.entries(this.config.position_offsets ?? {}).map(([key, value]) => [key, { ...(value ?? {}) }]),
+      ) as LovelaceCardConfig["position_offsets"];
+    }
+
     if (this.config.visibility) {
       next.visibility = { ...this.config.visibility };
     }
@@ -620,6 +863,10 @@ export class VentilationCardEditor extends LitElement {
       next.format = Object.fromEntries(
         Object.entries(this.config.format ?? {}).map(([key, value]) => [key, { ...(value ?? {}) }]),
       ) as LovelaceCardConfig["format"];
+    }
+
+    if (this.config.efficiency) {
+      next.efficiency = { ...this.config.efficiency };
     }
 
     return next;
@@ -745,6 +992,38 @@ export class VentilationCardEditor extends LitElement {
       grid-template-columns: minmax(0, 1fr);
       gap: 12px;
       align-items: center;
+    }
+
+    .position-offset-fields {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .position-offset-help {
+      grid-column: 1 / -1;
+      color: var(--secondary-text-color);
+      font-size: 12px;
+      line-height: 1.25;
+    }
+
+    .feature-fields {
+      display: grid;
+      gap: 10px;
+      padding: 10px;
+      border: 1px solid var(--divider-color, rgba(127, 127, 127, 0.2));
+      border-radius: 8px;
+    }
+
+    .feature-fields h4 {
+      margin: 0;
+      color: var(--primary-text-color);
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .feature-help {
+      color: var(--secondary-text-color);
+      font-size: 12px;
+      line-height: 1.25;
     }
 
     .number-field {

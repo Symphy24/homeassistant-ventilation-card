@@ -5,11 +5,89 @@ import type { EntityDisplay, HassEntity, HomeAssistant, LovelaceCardConfig, Valu
 
 const UNAVAILABLE_STATES = new Set(["unknown", "unavailable", "none", ""]);
 const SVG_VIEWBOX_WIDTH = 920;
-const BADGE_MIN_WIDTH = 50;
-const BADGE_HORIZONTAL_PADDING = 9;
+const SVG_VIEWBOX_HEIGHT = 360;
+const COMPACT_VIEWBOX_HEIGHT = 650;
+const DEFAULT_COMPACT_LAYOUT_BREAKPOINT = 900;
+const DEFAULT_EFFICIENCY_DECIMALS = 0;
+const DEFAULT_EFFICIENCY_CLAMP_MIN = 0;
+const DEFAULT_EFFICIENCY_CLAMP_MAX = 100;
+const MINIMUM_EFFICIENCY_DENOMINATOR = 0.001;
 const BADGE_EDGE_MARGIN = 8;
-const BADGE_LABEL_FONT_SIZE = 10;
-const BADGE_DEFAULT_VALUE_FONT_SIZE = 12;
+const DEFAULT_TEXT_FONT_SIZE = 14;
+const AHU_SCALES = {
+  small: 0.75,
+  medium: 1,
+  large: 1.25,
+} as const;
+
+type SchematicValueKey =
+  | "outdoor_temp"
+  | "supply_temp"
+  | "extract_temp"
+  | "exhaust_temp"
+  | "supply_fan"
+  | "extract_fan"
+  | "heat_exchanger_speed"
+  | "heater_output";
+
+type AnchorPoint = { x: number; y: number };
+type BadgePlacement = {
+  offset: AnchorPoint;
+  align: "left" | "center" | "right";
+};
+
+const SCHEMATIC_ANCHORS: Record<SchematicValueKey, AnchorPoint> = {
+  exhaust_temp: { x: 20, y: 120 },
+  extract_temp: { x: 900, y: 120 },
+  outdoor_temp: { x: 20, y: 240 },
+  supply_temp: { x: 900, y: 240 },
+  extract_fan: { x: 260, y: 120 },
+  supply_fan: { x: 660, y: 240 },
+  heat_exchanger_speed: { x: 460, y: 180 },
+  heater_output: { x: 734, y: 240 },
+};
+
+const WIDE_BADGE_PLACEMENTS: Record<SchematicValueKey, BadgePlacement> = {
+  exhaust_temp: { offset: { x: 8, y: -64 }, align: "left" },
+  extract_temp: { offset: { x: -8, y: -64 }, align: "right" },
+  outdoor_temp: { offset: { x: 8, y: 18 }, align: "left" },
+  supply_temp: { offset: { x: -8, y: 18 }, align: "right" },
+  extract_fan: { offset: { x: 0, y: -78 }, align: "center" },
+  supply_fan: { offset: { x: 0, y: 34 }, align: "center" },
+  heat_exchanger_speed: { offset: { x: 0, y: 92 }, align: "center" },
+  heater_output: { offset: { x: -22, y: -68 }, align: "right" },
+};
+
+const COMPACT_BADGE_PLACEMENTS: Record<SchematicValueKey, BadgePlacement> = {
+  exhaust_temp: { offset: { x: 12, y: -280 }, align: "left" },
+  extract_temp: { offset: { x: -12, y: -280 }, align: "right" },
+  outdoor_temp: { offset: { x: 12, y: 190 }, align: "left" },
+  supply_temp: { offset: { x: -12, y: 190 }, align: "right" },
+  extract_fan: { offset: { x: 0, y: -195 }, align: "center" },
+  supply_fan: { offset: { x: 0, y: 25 }, align: "center" },
+  heat_exchanger_speed: { offset: { x: 0, y: 155 }, align: "center" },
+  heater_output: { offset: { x: -26, y: -315 }, align: "right" },
+};
+
+const DEFAULT_WIDE_POSITION_OFFSETS: Partial<Record<SchematicValueKey, AnchorPoint>> = {
+  heat_exchanger_speed: { x: -3, y: 0 },
+  heater_output: { x: 65, y: -13 },
+  supply_fan: { x: -10, y: 3 },
+  extract_fan: { x: 10, y: -5 },
+  supply_temp: { x: 18, y: 0 },
+  extract_temp: { x: 18, y: 0 },
+};
+
+const DEFAULT_COMPACT_POSITION_OFFSETS: Partial<Record<SchematicValueKey, AnchorPoint>> = {
+  heat_exchanger_speed: { x: -50, y: -80 },
+  heater_output: { x: 65, y: 80 },
+  supply_fan: { x: -10, y: 3 },
+  extract_fan: { x: 10, y: 80 },
+  exhaust_temp: { x: 0, y: 55 },
+  supply_temp: { x: 18, y: -55 },
+  extract_temp: { x: 18, y: 55 },
+  outdoor_temp: { x: 0, y: -180 },
+};
 
 const ENGLISH_LABELS: Record<keyof VentilationEntities, string> = {
   outdoor_temp: "Outdoor air temperature",
@@ -19,7 +97,9 @@ const ENGLISH_LABELS: Record<keyof VentilationEntities, string> = {
   supply_fan: "Supply fan",
   extract_fan: "Extract fan",
   heat_exchanger_speed: "Heat exchanger",
+  heat_exchanger_efficiency: "Heat exchanger efficiency",
   heater_output: "Heater output",
+  supply_temp_before_heater: "Supply temperature before heater",
   filter_alarm: "Filter alarm",
   alarm: "Alarm",
   mode: "Mode",
@@ -30,6 +110,9 @@ export class VentilationCard extends LitElement {
   @property({ attribute: false }) public hass?: HomeAssistant;
 
   @state() private config?: LovelaceCardConfig;
+  @state() private narrowLayout = false;
+
+  private resizeObserver?: ResizeObserver;
 
   public setConfig(config: LovelaceCardConfig): void {
     if (!config) {
@@ -64,6 +147,31 @@ export class VentilationCard extends LitElement {
     return 5;
   }
 
+  public connectedCallback(): void {
+    super.connectedCallback();
+    if (this.hasUpdated) {
+      this.requestUpdate();
+    }
+  }
+
+  protected updated(): void {
+    if (!this.resizeObserver) {
+      this.observeCardWidth();
+      return;
+    }
+
+    const card = this.renderRoot.querySelector(".card");
+    if (card instanceof HTMLElement) {
+      this.updateResponsiveLayout(card.getBoundingClientRect().width);
+    }
+  }
+
+  public disconnectedCallback(): void {
+    this.resizeObserver?.disconnect();
+    this.resizeObserver = undefined;
+    super.disconnectedCallback();
+  }
+
   protected render() {
     const config = this.config;
 
@@ -72,11 +180,9 @@ export class VentilationCard extends LitElement {
     }
 
     const statusItems = (["mode", "filter_alarm", "alarm"] as Array<keyof VentilationEntities>).filter((key) => this.isVisible(key));
-    const layoutSize = this.layoutSize();
-
     return html`
       <ha-card>
-        <div class="card size-${layoutSize}">
+        <div class="card ${this.narrowLayout ? "layout-narrow" : "layout-wide"}">
           <header class="header">
             <h2>${config.name ?? "Ventilation"}</h2>
           </header>
@@ -89,6 +195,31 @@ export class VentilationCard extends LitElement {
         </div>
       </ha-card>
     `;
+  }
+
+  private observeCardWidth(): void {
+    const card = this.renderRoot.querySelector(".card");
+    if (!(card instanceof HTMLElement) || typeof ResizeObserver === "undefined") {
+      return;
+    }
+
+    this.resizeObserver?.disconnect();
+    this.resizeObserver = new ResizeObserver(([entry]) => {
+      if (!entry) {
+        return;
+      }
+
+      this.updateResponsiveLayout(entry.contentRect.width);
+    });
+    this.resizeObserver.observe(card);
+    this.updateResponsiveLayout(card.getBoundingClientRect().width);
+  }
+
+  private updateResponsiveLayout(width: number): void {
+    const narrowLayout = width < this.compactLayoutBreakpoint();
+    if (this.narrowLayout !== narrowLayout) {
+      this.narrowLayout = narrowLayout;
+    }
   }
 
 
@@ -119,6 +250,7 @@ export class VentilationCard extends LitElement {
     const extractFan = this.entityDisplay("extract_fan");
     const heatExchanger = this.entityDisplay("heat_exchanger_speed");
     const heater = this.entityDisplay("heater_output");
+    const efficiency = this.isEfficiencyVisible() ? this.heatExchangerEfficiencyValue() : undefined;
     const supplyFanSpeed = this.entityNumericValue("supply_fan");
     const extractFanSpeed = this.entityNumericValue("extract_fan");
     const heaterOutput = this.entityNumericValue("heater_output");
@@ -141,14 +273,11 @@ export class VentilationCard extends LitElement {
 
     return html`
       <svg
-        viewBox="0 0 920 360"
+        viewBox=${`0 0 ${SVG_VIEWBOX_WIDTH} ${this.schematicViewBoxHeight()}`}
         role="img"
         style="--supply-fan-duration: ${supplyFanDuration}; --extract-fan-duration: ${extractFanDuration}; --rotor-duration: ${rotorDuration}; --supply-airflow-duration: ${supplyAirflowDuration}; --extract-airflow-duration: ${extractAirflowDuration};"
       >
         <defs>
-          <filter id="soft-shadow" x="-20%" y="-20%" width="140%" height="140%">
-            <feDropShadow dx="0" dy="1" stdDeviation="2" flood-opacity="0.14"></feDropShadow>
-          </filter>
           <marker id="arrow-outdoor" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
             <path d="M0,0 L0,7 L7,3.5 z" class="arrow-head outdoor"></path>
           </marker>
@@ -163,7 +292,7 @@ export class VentilationCard extends LitElement {
           </marker>
         </defs>
 
-        <rect x="140" y="54" width="640" height="246" rx="12" class="unit-shell"></rect>
+        <g class="ahu-graphic" transform=${this.ahuTransform()}>
         <line x1="140" y1="180" x2="780" y2="180" class="unit-divider"></line>
         <line x1="460" y1="54" x2="460" y2="300" class="unit-divider muted"></line>
 
@@ -200,24 +329,38 @@ export class VentilationCard extends LitElement {
 
         ${this.renderFilter(220, 240)}
         ${this.renderFilter(702, 120)}
-        ${this.isVisible("heat_exchanger_speed") ? this.renderHeatExchanger(460, 180, rotorActive, rotorDuration, this.config?.exchanger_type ?? "rotary") : nothing}
-        ${this.isVisible("extract_fan") ? this.renderFan(260, 120, extractFanActive, extractFanDuration, "extract") : nothing}
-        ${this.isVisible("supply_fan") ? this.renderFan(660, 240, supplyFanActive, supplyFanDuration, "supply") : nothing}
-        ${this.isVisible("heater_output") ? this.renderHeaterCoil(734, 240, heaterOutput) : nothing}
-
-        <g class="badges">
-          ${this.isVisible("exhaust_temp") ? this.renderValueLabel(28, 64, exhaustTemp.label, exhaustTemp.value, "exhaust", "exhaust_temp") : nothing}
-          ${this.isVisible("extract_temp") ? this.renderValueLabel(792, 64, extractTemp.label, extractTemp.value, "extract", "extract_temp") : nothing}
-          ${this.isVisible("outdoor_temp") ? this.renderValueLabel(28, 258, outdoorTemp.label, outdoorTemp.value, "outdoor", "outdoor_temp") : nothing}
-          ${this.isVisible("supply_temp") ? this.renderValueLabel(792, 258, supplyTemp.label, supplyTemp.value, "supply", "supply_temp") : nothing}
-          ${this.isVisible("extract_fan") ? this.renderValueLabel(190, 38, extractFan.label, extractFan.value, "component", "extract_fan") : nothing}
-          ${this.isVisible("supply_fan") ? this.renderValueLabel(610, 304, supplyFan.label, supplyFan.value, "component", "supply_fan") : nothing}
-          ${this.isVisible("heat_exchanger_speed")
-            ? this.renderValueLabel(411, 274, heatExchanger.label, heatExchanger.value, "component", "heat_exchanger_speed")
-            : nothing}
-          ${this.isVisible("heater_output") ? this.renderValueLabel(714, 178, heater.label, heater.value, heaterOutput > 0 ? "heater-active" : "neutral", "heater_output") : nothing}
+        ${this.isVisible("heat_exchanger_speed")
+          ? this.renderHeatExchanger(
+              SCHEMATIC_ANCHORS.heat_exchanger_speed.x,
+              SCHEMATIC_ANCHORS.heat_exchanger_speed.y,
+              rotorActive,
+              rotorDuration,
+              this.config?.exchanger_type ?? "rotary",
+            )
+          : nothing}
+        ${this.isVisible("extract_fan")
+          ? this.renderFan(SCHEMATIC_ANCHORS.extract_fan.x, SCHEMATIC_ANCHORS.extract_fan.y, extractFanActive, extractFanDuration, "extract")
+          : nothing}
+        ${this.isVisible("supply_fan")
+          ? this.renderFan(SCHEMATIC_ANCHORS.supply_fan.x, SCHEMATIC_ANCHORS.supply_fan.y, supplyFanActive, supplyFanDuration, "supply")
+          : nothing}
+        ${this.isVisible("heater_output")
+          ? this.renderHeaterCoil(SCHEMATIC_ANCHORS.heater_output.x, SCHEMATIC_ANCHORS.heater_output.y, heaterOutput)
+          : nothing}
         </g>
       </svg>
+      <div class="badge-overlay">
+          ${this.isVisible("exhaust_temp") ? this.renderValueLabel("exhaust_temp", exhaustTemp.label, exhaustTemp.value, "exhaust") : nothing}
+          ${this.isVisible("extract_temp") ? this.renderValueLabel("extract_temp", extractTemp.label, extractTemp.value, "extract") : nothing}
+          ${this.isVisible("outdoor_temp") ? this.renderValueLabel("outdoor_temp", outdoorTemp.label, outdoorTemp.value, "outdoor") : nothing}
+          ${this.isVisible("supply_temp") ? this.renderValueLabel("supply_temp", supplyTemp.label, supplyTemp.value, "supply") : nothing}
+          ${this.isVisible("extract_fan") ? this.renderValueLabel("extract_fan", extractFan.label, extractFan.value, "component") : nothing}
+          ${this.isVisible("supply_fan") ? this.renderValueLabel("supply_fan", supplyFan.label, supplyFan.value, "component") : nothing}
+          ${this.isVisible("heat_exchanger_speed")
+            ? this.renderHeatExchangerValueLabel(heatExchanger.label, heatExchanger.value, efficiency)
+            : nothing}
+          ${this.isVisible("heater_output") ? this.renderValueLabel("heater_output", heater.label, heater.value, heaterOutput > 0 ? "heater-active" : "neutral") : nothing}
+      </div>
     `;
   }
 
@@ -301,63 +444,97 @@ export class VentilationCard extends LitElement {
     `;
   }
 
-  private renderValueLabel(x: number, y: number, label: string, value: string, tone = "neutral", key?: ValueBoxKey) {
-    const override = key ? this.config?.value_boxes?.[key] : undefined;
-    const valueFontSize = this.clampNumber(override?.font_size ?? BADGE_DEFAULT_VALUE_FONT_SIZE, 8, 24);
-    const width = this.valueBadgeWidth(label, value, valueFontSize);
-    const height = Math.max(34, valueFontSize + BADGE_LABEL_FONT_SIZE + 14);
-    const adjustedX = this.clampNumber(x, BADGE_EDGE_MARGIN, SVG_VIEWBOX_WIDTH - width - BADGE_EDGE_MARGIN);
-    const labelX = BADGE_HORIZONTAL_PADDING;
-    const labelY = 13;
-    const valueY = Math.max(27, labelY + valueFontSize + 4);
+  private renderValueLabel(key: SchematicValueKey, label: string, value: string, tone = "neutral") {
+    const override = this.config?.value_boxes?.[key];
+    const entityId = this.getEntityId(key);
+    const position = this.badgePosition(key);
+    const valueFontSize = this.clampNumber(override?.font_size ?? DEFAULT_TEXT_FONT_SIZE, 8, 24);
     const style = [
+      `left: ${(position.x / SVG_VIEWBOX_WIDTH) * 100}%;`,
+      `top: ${(position.y / this.schematicViewBoxHeight()) * 100}%;`,
       override?.border_color ? `--vc-badge-border-color: ${override.border_color};` : "",
-      override?.font_size ? `--vc-badge-font-size: ${override.font_size}px;` : "",
+      `--vc-badge-font-size: ${valueFontSize}px;`,
     ].join(" ");
-    return svg`
-      <g class="svg-badge ${tone}" transform="translate(${adjustedX} ${y})" style=${style}>
-        <rect width=${width} height=${height} rx="6"></rect>
-        <text x=${labelX} y=${labelY} class="badge-label">${label}</text>
-        <text x=${labelX} y=${valueY} class="badge-value">${value}</text>
-      </g>
+    return html`
+      <div
+        class="value-badge badge-${key} ${tone} align-${position.align} ${entityId ? "interactive" : ""}"
+        style=${style}
+        role=${entityId ? "button" : nothing}
+        tabindex=${entityId ? "0" : nothing}
+        aria-label=${entityId ? `${label}: ${value}. Open details.` : nothing}
+        @click=${entityId ? () => this.openMoreInfo(key) : nothing}
+        @keydown=${entityId ? (event: KeyboardEvent) => this.handleMoreInfoKeydown(event, key) : nothing}
+      >
+        <span class="badge-label">${label}</span>
+        <strong class="badge-value">${value}</strong>
+      </div>
     `;
   }
 
-  private valueBadgeWidth(label: string, value: string, valueFontSize: number): number {
-    const labelWidth = this.estimateSvgTextWidth(label, BADGE_LABEL_FONT_SIZE);
-    const valueWidth = this.estimateSvgTextWidth(value, valueFontSize);
-    const maxWidth = SVG_VIEWBOX_WIDTH - BADGE_EDGE_MARGIN * 2;
-    return Math.min(maxWidth, Math.ceil(Math.max(BADGE_MIN_WIDTH, labelWidth, valueWidth) + BADGE_HORIZONTAL_PADDING * 2));
-  }
+  private renderHeatExchangerValueLabel(label: string, speed: string, efficiency?: string) {
+    const key = "heat_exchanger_speed";
+    const override = this.config?.value_boxes?.[key];
+    const entityId = this.getEntityId(key);
+    const position = this.badgePosition(key);
+    const valueFontSize = this.clampNumber(override?.font_size ?? DEFAULT_TEXT_FONT_SIZE, 8, 24);
+    const details = efficiency == null ? `Speed: ${speed}` : `Speed: ${speed}. Efficiency: ${efficiency}`;
+    const style = [
+      `left: ${(position.x / SVG_VIEWBOX_WIDTH) * 100}%;`,
+      `top: ${(position.y / this.schematicViewBoxHeight()) * 100}%;`,
+      override?.border_color ? `--vc-badge-border-color: ${override.border_color};` : "",
+      `--vc-badge-font-size: ${valueFontSize}px;`,
+    ].join(" ");
 
-  private estimateSvgTextWidth(text: string, fontSize: number): number {
-    return Array.from(text).reduce((width, character) => {
-      if (character === " ") {
-        return width + fontSize * 0.32;
-      }
-      if ("il.,:;|'![]()".includes(character)) {
-        return width + fontSize * 0.32;
-      }
-      if ("MW@#%&".includes(character)) {
-        return width + fontSize * 0.85;
-      }
-      if (character >= "0" && character <= "9") {
-        return width + fontSize * 0.58;
-      }
-      return width + fontSize * 0.56;
-    }, 0);
+    return html`
+      <div
+        class="value-badge badge-${key} component align-${position.align} ${entityId ? "interactive" : ""}"
+        style=${style}
+        role=${entityId ? "button" : nothing}
+        tabindex=${entityId ? "0" : nothing}
+        aria-label=${entityId ? `${label}. ${details}. Open details.` : nothing}
+        @click=${entityId ? () => this.openMoreInfo(key) : nothing}
+        @keydown=${entityId ? (event: KeyboardEvent) => this.handleMoreInfoKeydown(event, key) : nothing}
+      >
+        <span class="badge-label">${label}</span>
+        <span class="badge-metric"><span>Speed:</span><strong>${speed}</strong></span>
+        ${efficiency == null ? nothing : html`<span class="badge-metric"><span>Efficiency:</span><strong>${efficiency}</strong></span>`}
+      </div>
+    `;
   }
 
   private renderStatusItem(key: keyof VentilationEntities) {
     const display = this.entityDisplay(key);
     const override = this.config?.value_boxes?.[key];
+    const entityId = this.getEntityId(key);
     const style = [
       override?.border_color ? `--vc-status-border-color: ${override.border_color};` : "",
       override?.font_size ? `--vc-status-font-size: ${override.font_size}px;` : "",
     ].join(" ");
 
+    if (key === "mode" && this.modeOptions().length > 0) {
+      return html`
+        <div class="status-item mode-select ${display.tone ?? "normal"}" style=${style}>
+          <span>${display.label}</span>
+          <select
+            aria-label=${display.label}
+            .value=${this.getEntityState("mode")?.state ?? ""}
+            @change=${(event: Event) => this.selectMode((event.target as HTMLSelectElement).value)}
+          >
+            ${this.modeOptions().map((option) => html`<option .value=${option}>${option}</option>`)}
+          </select>
+        </div>
+      `;
+    }
+
     return html`
-      <div class="status-item ${display.tone ?? "normal"}" style=${style}>
+      <div
+        class="status-item ${display.tone ?? "normal"} ${entityId ? "interactive" : ""}"
+        style=${style}
+        role=${entityId ? "button" : nothing}
+        tabindex=${entityId ? "0" : nothing}
+        @click=${entityId ? () => this.openMoreInfo(key) : nothing}
+        @keydown=${entityId ? (event: KeyboardEvent) => this.handleMoreInfoKeydown(event, key) : nothing}
+      >
         <span>${display.label}</span>
         <strong>${display.value}</strong>
       </div>
@@ -403,6 +580,52 @@ export class VentilationCard extends LitElement {
     return this.hass.states[entityId];
   }
 
+  private openMoreInfo(key: keyof VentilationEntities): void {
+    const entityId = this.getEntityId(key);
+    if (!entityId) {
+      return;
+    }
+
+    this.dispatchEvent(
+      new CustomEvent("hass-more-info", {
+        detail: { entityId },
+        bubbles: true,
+        composed: true,
+      }),
+    );
+  }
+
+  private handleMoreInfoKeydown(event: KeyboardEvent, key: keyof VentilationEntities): void {
+    if (event.key !== "Enter" && event.key !== " ") {
+      return;
+    }
+
+    event.preventDefault();
+    this.openMoreInfo(key);
+  }
+
+  private modeOptions(): string[] {
+    const entityId = this.getEntityId("mode");
+    const options = this.getEntityState("mode")?.attributes.options;
+    if (!entityId?.startsWith("input_select.") || !Array.isArray(options)) {
+      return [];
+    }
+
+    return options.filter((option): option is string => typeof option === "string");
+  }
+
+  private selectMode(option: string): void {
+    const entityId = this.getEntityId("mode");
+    if (!entityId?.startsWith("input_select.") || !this.modeOptions().includes(option)) {
+      return;
+    }
+
+    void this.hass?.callService?.("input_select", "select_option", {
+      entity_id: entityId,
+      option,
+    });
+  }
+
   private getEntityValue(key: keyof VentilationEntities): string {
     return this.formatEntityValue(key, this.getEntityState(key));
   }
@@ -418,11 +641,12 @@ export class VentilationCard extends LitElement {
 
     const format = this.config?.format?.[key];
     const numeric = Number.parseFloat(String(entity.state).replace(",", "."));
-    const value =
-      format?.decimals != null && Number.isFinite(numeric)
-        ? numeric.toFixed(Math.round(this.clampNumber(format.decimals, 0, 4)))
-        : entity.state;
     const unit = entity.attributes.unit_of_measurement;
+    const decimals = format?.decimals ?? (unit === "%" ? 0 : undefined);
+    const value =
+      decimals != null && Number.isFinite(numeric)
+        ? numeric.toFixed(Math.round(this.clampNumber(decimals, 0, 4)))
+        : entity.state;
     return unit && format?.show_unit !== false ? `${value} ${unit}` : String(value);
   }
 
@@ -455,6 +679,115 @@ export class VentilationCard extends LitElement {
     }
 
     return ["on", "running", "active", "true"].includes(String(entity.state).toLowerCase()) ? 100 : 0;
+  }
+
+  private numericEntityState(key: keyof VentilationEntities): number | undefined {
+    const entity = this.getEntityState(key);
+    if (!entity || UNAVAILABLE_STATES.has(String(entity.state).trim().toLowerCase())) {
+      return undefined;
+    }
+
+    const numeric = Number.parseFloat(String(entity.state).trim().replace(",", "."));
+    return Number.isFinite(numeric) ? numeric : undefined;
+  }
+
+  private heatExchangerEfficiencyValue(): string {
+    if (this.efficiencySource() === "entity") {
+      return this.formatEfficiencyEntityValue();
+    }
+
+    const efficiency = this.heatExchangerEfficiency();
+    if (efficiency == null) {
+      return "\u2014";
+    }
+
+    const configuredDecimals = this.config?.efficiency?.decimals ?? this.config?.format?.heat_exchanger_speed?.decimals;
+    const decimals = Math.round(this.clampNumber(configuredDecimals ?? DEFAULT_EFFICIENCY_DECIMALS, 0, 4));
+    return `${efficiency.toFixed(decimals)} %`;
+  }
+
+  private formatEfficiencyEntityValue(): string {
+    const entity = this.getEntityState("heat_exchanger_efficiency");
+    if (!entity || UNAVAILABLE_STATES.has(String(entity.state).trim().toLowerCase())) {
+      return "\u2014";
+    }
+
+    const numeric = Number.parseFloat(String(entity.state).trim().replace(",", "."));
+    if (!Number.isFinite(numeric)) {
+      return "\u2014";
+    }
+
+    const unit = entity.attributes.unit_of_measurement;
+    const configuredDecimals = this.config?.efficiency?.decimals ?? this.config?.format?.heat_exchanger_efficiency?.decimals;
+    const decimals = Math.round(this.clampNumber(configuredDecimals ?? (unit === "%" ? 0 : DEFAULT_EFFICIENCY_DECIMALS), 0, 4));
+    const value = numeric.toFixed(decimals);
+    return unit && this.config?.format?.heat_exchanger_efficiency?.show_unit !== false ? `${value} ${unit}` : value;
+  }
+
+  private isEfficiencyVisible(): boolean {
+    const efficiency = this.config?.efficiency;
+    if (!efficiency || efficiency.enabled === false) {
+      return false;
+    }
+
+    return efficiency.enabled === true || efficiency.source === "entity" || efficiency.source === "calculated";
+  }
+
+  private efficiencySource(): "entity" | "calculated" {
+    return this.config?.efficiency?.source === "entity" ? "entity" : "calculated";
+  }
+
+  private heatExchangerEfficiency(): number | undefined {
+    const outdoorTemp = this.numericEntityState("outdoor_temp");
+    const extractTemp = this.numericEntityState("extract_temp");
+    if (outdoorTemp == null || extractTemp == null) {
+      return undefined;
+    }
+
+    const denominator = extractTemp - outdoorTemp;
+    if (Math.abs(denominator) < MINIMUM_EFFICIENCY_DENOMINATOR) {
+      return undefined;
+    }
+
+    let numerator: number | undefined;
+    if (this.config?.efficiency?.has_supply_temp_before_heater === true) {
+      const beforeHeaterTemp = this.numericEntityState("supply_temp_before_heater");
+      if (beforeHeaterTemp != null) {
+        numerator = beforeHeaterTemp - outdoorTemp;
+      }
+    }
+
+    if (numerator == null) {
+      const heaterOutput = this.numericEntityState("heater_output");
+      if (heaterOutput == null) {
+        return undefined;
+      }
+
+      if (heaterOutput < 1) {
+        const supplyTemp = this.numericEntityState("supply_temp");
+        if (supplyTemp == null) {
+          return undefined;
+        }
+        numerator = supplyTemp - outdoorTemp;
+      } else {
+        const exhaustTemp = this.numericEntityState("exhaust_temp");
+        if (exhaustTemp == null) {
+          return undefined;
+        }
+        numerator = extractTemp - exhaustTemp;
+      }
+    }
+
+    const result = (numerator / denominator) * 100;
+    if (!Number.isFinite(result)) {
+      return undefined;
+    }
+
+    const configuredMin = this.config?.efficiency?.clamp_min;
+    const configuredMax = this.config?.efficiency?.clamp_max;
+    const min = Number.isFinite(configuredMin) ? configuredMin as number : DEFAULT_EFFICIENCY_CLAMP_MIN;
+    const max = Number.isFinite(configuredMax) ? configuredMax as number : DEFAULT_EFFICIENCY_CLAMP_MAX;
+    return this.clampNumber(result, Math.min(min, max), Math.max(min, max));
   }
 
   private getAnimationDurationFromValue(value: number, minDuration: number, maxDuration: number, maxSpeedPercent = 100): string {
@@ -493,9 +826,64 @@ export class VentilationCard extends LitElement {
     return this.clampNumber(settings?.animation_max_speed ?? settings?.animation_speed ?? this.animationMaxSpeed(legacyKey), 0, 100);
   }
 
-  private layoutSize(): "compact" | "normal" | "large" {
-    const size = this.config?.layout?.size;
-    return size === "compact" || size === "large" ? size : "normal";
+  private ahuTransform(): string {
+    const scale = this.ahuScale();
+    return `translate(0 ${this.schematicYOffset()}) translate(460 180) scale(${scale}) translate(-460 -180)`;
+  }
+
+  private badgePosition(key: SchematicValueKey): AnchorPoint & { align: BadgePlacement["align"] } {
+    const anchor = this.scaledAnchor(SCHEMATIC_ANCHORS[key]);
+    const placement = (this.narrowLayout ? COMPACT_BADGE_PLACEMENTS : WIDE_BADGE_PLACEMENTS)[key];
+    const defaultOffset = (this.narrowLayout ? DEFAULT_COMPACT_POSITION_OFFSETS : DEFAULT_WIDE_POSITION_OFFSETS)[key];
+    const customOffset = this.config?.position_offsets?.[key];
+    return {
+      x: this.clampNumber(
+        anchor.x + placement.offset.x + (defaultOffset?.x ?? 0) + this.positionOffsetValue(customOffset?.x),
+        BADGE_EDGE_MARGIN,
+        SVG_VIEWBOX_WIDTH - BADGE_EDGE_MARGIN,
+      ),
+      y: Math.max(BADGE_EDGE_MARGIN, anchor.y + placement.offset.y + (defaultOffset?.y ?? 0) + this.positionOffsetValue(customOffset?.y)),
+      align: placement.align,
+    };
+  }
+
+  private scaledAnchor(anchor: AnchorPoint): AnchorPoint {
+    const scale = this.ahuScale();
+    return {
+      x: 460 + (anchor.x - 460) * scale,
+      y: this.schematicYOffset() + 180 + (anchor.y - 180) * scale,
+    };
+  }
+
+  private schematicViewBoxHeight(): number {
+    return this.narrowLayout ? COMPACT_VIEWBOX_HEIGHT : SVG_VIEWBOX_HEIGHT;
+  }
+
+  private schematicYOffset(): number {
+    return this.narrowLayout ? 170 : 0;
+  }
+
+  private ahuScale(): number {
+    const configuredSize = this.config?.layout?.ahu_size;
+    const size = configuredSize === "small" || configuredSize === "large" ? configuredSize : "medium";
+    return AHU_SCALES[size];
+  }
+
+  private compactLayoutBreakpoint(): number {
+    return this.clampNumber(this.config?.layout?.compact_breakpoint ?? DEFAULT_COMPACT_LAYOUT_BREAKPOINT, 500, 1200);
+  }
+
+  private positionOffsetValue(value: unknown): number {
+    if (typeof value === "number") {
+      return Number.isFinite(value) ? value : 0;
+    }
+
+    if (typeof value === "string" && value.trim().length > 0) {
+      const numeric = Number(value);
+      return Number.isFinite(numeric) ? numeric : 0;
+    }
+
+    return 0;
   }
 
   private clampNumber(value: number, min: number, max: number): number {
@@ -528,26 +916,10 @@ export class VentilationCard extends LitElement {
 
     .card {
       padding: 12px;
+      font-family: var(--paper-font-body1_-_font-family, var(--ha-font-family, inherit));
       --vc-card-title-size: 20px;
       --vc-svg-max-height: 360px;
-      --vc-status-label-size: 12px;
-      --vc-status-default-value-size: 13px;
-    }
-
-    .card.size-compact {
-      padding: 10px;
-      --vc-card-title-size: 18px;
-      --vc-svg-max-height: 320px;
-      --vc-status-label-size: 11px;
-      --vc-status-default-value-size: 12px;
-    }
-
-    .card.size-large {
-      padding: 14px;
-      --vc-card-title-size: 22px;
-      --vc-svg-max-height: 420px;
-      --vc-status-label-size: 13px;
-      --vc-status-default-value-size: 14px;
+      --vc-default-text-size: 14px;
     }
 
     .header {
@@ -566,6 +938,7 @@ export class VentilationCard extends LitElement {
     }
 
     .schematic {
+      position: relative;
       border: 1px solid var(--divider-color, rgba(127, 127, 127, 0.24));
       border-radius: 10px;
       background: transparent;
@@ -580,12 +953,8 @@ export class VentilationCard extends LitElement {
       color: var(--primary-text-color, #111);
     }
 
-    .unit-shell {
-      fill: var(--ha-card-background, var(--card-background-color, transparent));
-      fill-opacity: 0.72;
-      filter: url(#soft-shadow);
-      stroke: var(--divider-color, rgba(127, 127, 127, 0.5));
-      stroke-width: 1.5;
+    .layout-narrow svg {
+      max-height: none;
     }
 
     .unit-divider {
@@ -627,14 +996,14 @@ export class VentilationCard extends LitElement {
     .flow-line,
     .internal-flow-line {
       fill: none;
-      stroke-width: 2.5;
+      stroke-width: 7.5;
       stroke-linecap: round;
-      stroke-dasharray: 9 9;
+      stroke-dasharray: 15 12;
       opacity: 0.92;
     }
 
     .internal-flow-line {
-      stroke-width: 2.2;
+      stroke-width: 6.6;
       opacity: 0.78;
     }
 
@@ -859,54 +1228,110 @@ export class VentilationCard extends LitElement {
       stroke-width: 3.8;
     }
 
-    .svg-badge rect {
-      fill: var(--vc-value-box-background-color, var(--ha-card-background, var(--card-background-color, #ffffff)));
-      fill-opacity: 0.92;
-      stroke: var(--vc-badge-border-color, var(--vc-badge-tone-border-color, var(--vc-value-box-border-color, var(--divider-color, rgba(127, 127, 127, 0.56)))));
-      stroke-width: 1.35;
+    .badge-overlay {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
     }
 
-    .svg-badge.outdoor {
+    .value-badge {
+      position: absolute;
+      box-sizing: border-box;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      min-width: 50px;
+      max-width: calc(100% - 16px);
+      padding: 5px 9px 6px;
+      border: 1.35px solid var(--vc-badge-border-color, var(--vc-badge-tone-border-color, var(--vc-value-box-border-color, var(--divider-color, rgba(127, 127, 127, 0.56)))));
+      border-radius: 6px;
+      background: var(--vc-value-box-background-color, var(--ha-card-background, var(--card-background-color, #ffffff)));
+      color: var(--primary-text-color, #111);
+      line-height: 1.15;
+      white-space: nowrap;
+    }
+
+    .value-badge.align-center {
+      transform: translateX(-50%);
+    }
+
+    .value-badge.align-right {
+      transform: translateX(-100%);
+    }
+
+    .value-badge.outdoor {
       --vc-badge-tone-border-color: var(--vc-air-outdoor);
     }
 
-    .svg-badge.supply {
+    .value-badge.supply {
       --vc-badge-tone-border-color: var(--vc-air-supply);
     }
 
-    .svg-badge.extract {
+    .value-badge.extract {
       --vc-badge-tone-border-color: var(--vc-air-extract);
     }
 
-    .svg-badge.exhaust {
+    .value-badge.exhaust {
       --vc-badge-tone-border-color: var(--vc-air-exhaust);
     }
 
-    .svg-badge.heater-active {
+    .value-badge.heater-active {
       --vc-badge-tone-border-color: var(--vc-air-supply);
     }
 
-    .svg-badge.component rect {
-      fill-opacity: 0.96;
-      stroke: var(--vc-badge-border-color, var(--vc-value-box-border-color, var(--primary-text-color, #1f2937)));
-      stroke-opacity: 0.42;
-      stroke-width: 1.6;
+    .value-badge.component {
+      border-color: var(--vc-badge-border-color, var(--vc-component-badge-border, var(--vc-value-box-border-color, var(--divider-color, rgba(127, 127, 127, 0.56)))));
     }
 
-    .svg-badge text {
-      fill: var(--primary-text-color, #111);
-      dominant-baseline: middle;
+    .value-badge.badge-extract_fan,
+    .value-badge.badge-supply_fan,
+    .value-badge.badge-heat_exchanger_speed {
+      --vc-component-badge-border: var(--secondary-text-color, #607080);
     }
 
-    .svg-badge .badge-label {
-      fill: var(--secondary-text-color, #727272);
-      font-size: 9.5px;
+    .value-badge .badge-label,
+    .value-badge .badge-value,
+    .value-badge .badge-metric {
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .value-badge .badge-label {
+      color: var(--secondary-text-color, #727272);
+      font-size: var(--vc-default-text-size);
       font-weight: 500;
     }
 
-    .svg-badge .badge-value {
-      font-size: var(--vc-badge-font-size, 12px);
+    .value-badge .badge-value {
+      color: var(--primary-text-color, #111);
+      font-size: var(--vc-badge-font-size, var(--vc-default-text-size));
       font-weight: 600;
+    }
+
+    .value-badge .badge-metric {
+      display: grid;
+      grid-template-columns: auto auto;
+      justify-content: space-between;
+      gap: 12px;
+      color: var(--primary-text-color, #111);
+      font-size: var(--vc-badge-font-size, var(--vc-default-text-size));
+      font-weight: 500;
+    }
+
+    .value-badge .badge-metric strong {
+      font-size: inherit;
+      font-weight: 600;
+    }
+
+    .value-badge.interactive {
+      pointer-events: auto;
+      cursor: pointer;
+    }
+
+    .value-badge.interactive:focus {
+      border-color: var(--primary-color, #03a9f4);
+      border-width: 2px;
+      outline: none;
     }
 
     .status-strip {
@@ -928,6 +1353,15 @@ export class VentilationCard extends LitElement {
       background: transparent;
     }
 
+    .status-item.interactive {
+      cursor: pointer;
+    }
+
+    .status-item.interactive:focus {
+      border-color: var(--primary-color, #03a9f4);
+      outline: none;
+    }
+
     .status-item span,
     .status-item strong {
       overflow-wrap: anywhere;
@@ -935,16 +1369,34 @@ export class VentilationCard extends LitElement {
 
     .status-item span {
       color: var(--secondary-text-color, #727272);
-      font-size: var(--vc-status-label-size);
+      font-size: var(--vc-default-text-size);
       line-height: 1.2;
     }
 
     .status-item strong {
       color: var(--primary-text-color, #111);
-      font-size: var(--vc-status-font-size, var(--vc-status-default-value-size));
+      font-size: var(--vc-status-font-size, var(--vc-default-text-size));
       font-weight: 600;
       line-height: 1.25;
       text-align: right;
+    }
+
+    .status-item select {
+      min-width: 0;
+      max-width: 60%;
+      padding: 4px 6px;
+      border: 1px solid var(--divider-color, rgba(127, 127, 127, 0.35));
+      border-radius: 5px;
+      background: var(--ha-card-background, var(--card-background-color, transparent));
+      color: var(--primary-text-color, #111);
+      font: inherit;
+      font-size: var(--vc-status-font-size, var(--vc-default-text-size));
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    .layout-narrow .status-strip {
+      grid-template-columns: 1fr;
     }
 
     .status-item.warning strong {
@@ -957,7 +1409,7 @@ export class VentilationCard extends LitElement {
 
     @keyframes airflow {
       to {
-        stroke-dashoffset: -18;
+        stroke-dashoffset: -27;
       }
     }
 
@@ -980,9 +1432,6 @@ export class VentilationCard extends LitElement {
         grid-template-columns: 1fr;
       }
 
-      .svg-badge .badge-value {
-        font-size: var(--vc-badge-font-size, 11px);
-      }
     }
   `;
 }
