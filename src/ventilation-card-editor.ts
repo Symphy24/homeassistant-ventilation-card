@@ -205,7 +205,9 @@ export class VentilationCardEditor extends LitElement {
           <small>${this.config.entities?.[panel.key] || "No entity"}</small>
         </summary>
         <div class="panel-fields">
-          ${this.renderSwitchField("Show", this.config.visibility?.[panel.key] !== false, (value) => this.updateNestedBoolean("visibility", panel.key, value))}
+          ${this.renderSwitchField("Show", this.config.component_visibility?.[panel.key] !== false, (value) =>
+            this.updateNestedBoolean("component_visibility", panel.key, value),
+          )}
           <ha-entity-picker
             .hass=${this.hass}
             .value=${this.config.entities?.[panel.key] ?? ""}
@@ -703,12 +705,16 @@ export class VentilationCardEditor extends LitElement {
     this.updateConfig(next);
   }
 
-  private updateNestedBoolean(section: "visibility" | "animations", key: keyof VentilationVisibility | keyof VentilationAnimationConfig, value: boolean): void {
+  private updateNestedBoolean(
+    section: "component_visibility" | "animations",
+    key: keyof VentilationVisibility | keyof VentilationAnimationConfig,
+    value: boolean,
+  ): void {
     const next = this.cloneConfig();
     const current = { ...(next[section] ?? {}) } as Record<string, boolean>;
     current[key as string] = value;
-    if (section === "visibility") {
-      next.visibility = current as VentilationVisibility;
+    if (section === "component_visibility") {
+      next.component_visibility = current as VentilationVisibility;
     } else {
       next.animations = current as VentilationAnimationConfig;
     }
@@ -841,8 +847,8 @@ export class VentilationCardEditor extends LitElement {
       ) as LovelaceCardConfig["position_offsets"];
     }
 
-    if (this.config.visibility) {
-      next.visibility = { ...this.config.visibility };
+    if (this.config.component_visibility) {
+      next.component_visibility = { ...this.config.component_visibility };
     }
 
     if (this.config.animations) {
