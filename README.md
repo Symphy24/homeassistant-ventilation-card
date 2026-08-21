@@ -26,7 +26,7 @@ Examples of the card in different Home Assistant themes and transparency modes.
 - Compact status row for mode, filter alarm, and alarm
 - Clickable configured value boxes and alarm status items that open Home Assistant more-info
 - Native mode selection for configured `input_select` mode entities
-- Collapsible visual Lovelace UI editor for card configuration, entities, labels, colors, visibility, animations, and formatting
+- Collapsible visual Lovelace UI editor for card configuration, entities, labels, colors, component visibility, animations, and formatting
 - English default labels with optional per-component label overrides
 - Optional airflow color overrides
 - Optional per-sensor/component visibility
@@ -99,7 +99,7 @@ colors:
   supply_air: "#f2a93b"
   extract_air: "#f6b66b"
   exhaust_air: "#4f86b8"
-visibility:
+component_visibility:
   heater_output: true
 animations:
   enabled: true
@@ -130,7 +130,9 @@ format:
     show_unit: true
 ```
 
-Existing configurations without `labels:`, `colors:`, `visibility:`, `animations:`, `component_settings:`, `format:`, `value_boxes:`, `position_offsets:`, `layout:`, or `efficiency:` options continue to work.
+Existing configurations without `labels:`, `colors:`, `component_visibility:`, `animations:`, `component_settings:`, `format:`, `value_boxes:`, `position_offsets:`, `layout:`, or `efficiency:` options continue to work.
+
+> **Migration note:** versions up to 0.1.0 used `visibility:` for per-component visibility. Rename that key to `component_visibility:`. Home Assistant reserves top-level `visibility:` for an array of whole-card visibility conditions; using an object there causes `TypeError: conditions.every is not a function` in Home Assistant 2025.4.
 
 Existing configurations that still contain `language:` are accepted, but the setting is ignored.
 Existing `layout.size` values are tolerated for compatibility. The visual editor exposes `layout.ahu_size` for schematic sizing.
@@ -150,7 +152,7 @@ All fields are optional except `type`. Missing entity mappings render as `—` i
 | `entities` | object | `{}` | Home Assistant entity IDs used by the card. |
 | `labels` | object | built-in labels | Optional visible label overrides. |
 | `colors` | object | built-in airflow colors | Optional airflow path colors. |
-| `visibility` | object | visible | Optional per-key show/hide settings. |
+| `component_visibility` | object | visible | Optional per-key show/hide settings. The top-level `visibility` key remains available for Home Assistant's native whole-card conditions. |
 | `animations` | object | current animation behavior | Optional global/airflow animation fallback settings. |
 | `component_settings` | object | animation fallback settings | Optional per-component animation settings. |
 | `format` | object | current HA state formatting | Optional per-key decimals and unit display. |
@@ -257,10 +259,10 @@ Use the optional top-level `labels:` section to override visible text. Custom la
 
 ## Optional Visibility
 
-Use `visibility:` to hide individual value boxes or components. Missing keys are visible by default. If a key is visible but its entity is missing, the card still displays `—`.
+Use `component_visibility:` to hide individual value boxes or components. Missing keys are visible by default. If a key is visible but its entity is missing, the card still displays `—`.
 
 ```yaml
-visibility:
+component_visibility:
   outdoor_temp: true
   heater_output: false
   alarm: true
