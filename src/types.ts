@@ -106,6 +106,8 @@ export interface VentilationEfficiencyConfig {
 export interface LovelaceCardConfig {
   type: string;
   grid_options?: unknown;
+  /** Home Assistant's native card visibility conditions. */
+  visibility?: unknown[];
   name?: string;
   language?: string;
   exchanger_type?: ExchangerType;
@@ -116,7 +118,7 @@ export interface LovelaceCardConfig {
   value_box?: VentilationValueBoxConfig;
   value_boxes?: Partial<Record<ValueBoxKey, VentilationValueBoxOverride>>;
   position_offsets?: Partial<Record<ValueBoxKey, VentilationPositionOffset>>;
-  visibility?: VentilationVisibility;
+  component_visibility?: VentilationVisibility;
   animations?: VentilationAnimationConfig;
   component_settings?: Partial<Record<ValueBoxKey, VentilationComponentSettings>>;
   layout?: VentilationLayoutConfig;

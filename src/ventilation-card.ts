@@ -806,7 +806,7 @@ export class VentilationCard extends LitElement {
   }
 
   private isVisible(key: keyof VentilationEntities): boolean {
-    return this.config?.visibility?.[key] !== false;
+    return this.config?.component_visibility?.[key] !== false;
   }
 
   private animationEnabled(key: "enabled" | "airflow_enabled" | "fans_enabled" | "rotor_enabled"): boolean {
