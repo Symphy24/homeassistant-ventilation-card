@@ -19,6 +19,7 @@ import type {
   VentilationValueBoxConfig,
   VentilationValueBoxOverride,
 } from "./types";
+import { normalizeConfig } from "./config";
 
 type ComponentPanel = {
   key: ValueBoxKey;
@@ -95,7 +96,7 @@ export class VentilationCardEditor extends LitElement {
 
   public setConfig(config: LovelaceCardConfig): void {
     this.config = {
-      ...config,
+      ...normalizeConfig(config),
       type: config.type || "custom:ventilation-card",
       exchanger_type: config.exchanger_type ?? "rotary",
     };

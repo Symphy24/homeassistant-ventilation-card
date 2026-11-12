@@ -132,7 +132,7 @@ format:
 
 Existing configurations without `labels:`, `colors:`, `component_visibility:`, `animations:`, `component_settings:`, `format:`, `value_boxes:`, `position_offsets:`, `layout:`, or `efficiency:` options continue to work.
 
-> **Migration note:** versions up to 0.1.0 used `visibility:` for per-component visibility. Rename that key to `component_visibility:`. Home Assistant reserves top-level `visibility:` for an array of whole-card visibility conditions; using an object there causes `TypeError: conditions.every is not a function` in Home Assistant 2025.4.
+> **Migration note:** versions up to 0.1.0 used `visibility:` for per-component visibility. Rename that key to `component_visibility:`. An old `visibility:` object is still read and moved to `component_visibility:` when the card loads (and when the visual editor saves), so existing cards keep hiding the same components, but the old key still breaks Home Assistant itself (for example inside a vertical stack), so rename it. Home Assistant reserves top-level `visibility:` for an array of whole-card visibility conditions; using an object there causes `TypeError: conditions.every is not a function` in Home Assistant 2025.4.
 
 Existing configurations that still contain `language:` are accepted, but the setting is ignored.
 Existing `layout.size` values are tolerated for compatibility. The visual editor exposes `layout.ahu_size` for schematic sizing.
